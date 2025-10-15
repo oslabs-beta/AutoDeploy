@@ -144,3 +144,6 @@ node_modules/
 dist/
 coverage/
 .DS_Store
+
+# SSH key for AWS
+jenkins.pem
