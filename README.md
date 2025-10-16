@@ -1,5 +1,19 @@
 # AutoDeploy
-Auto-Generated Secure CI/CD Pipelines with AI + MCP
+# MCP CI/CD Builder
+
+## 🧩 Overview
+AI-driven system that generates secure, automated CI/CD pipelines for GitHub projects.
+
+### Team
+- Victoria — Frontend & State Management/GitHub Integrations
+- Lorenc — Backend / MCP Orchestration/GitHub Integrations 
+- Alex — SCRUM/ AWS / DevOps
+- Paython — SCRUM / MCP Integration
+
+### Tech Stack
+React + Tailwind + Shadcn + Zustand  
+Node + Express + Supabase + MCP SDK  
+AWS OIDC + GitHub Actions  
 
 
 General plan for file structure:
