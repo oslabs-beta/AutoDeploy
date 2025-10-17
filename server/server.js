@@ -6,6 +6,7 @@ import morgan from 'morgan';
 import { healthCheck } from './db.js';
 import githubAuthRouter from './routes/auth.github.js';
 import userRouter from './routes/usersRoutes.js';
+import mcpRoutes from './routes/mcp.js';
 
 const app = express();
 app.use(express.json());
