@@ -3,8 +3,9 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import { healthCheck, query } from './db.js';
+import githubAuthRouter from './routes/auth.github.js';
 import { z } from 'zod';
-import { query, healthCheck } from './db.js';
 
 const app = express();
 app.use(express.json());
@@ -12,7 +13,7 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(helmet());
 app.use(morgan('dev'));
 
-/** Health & DB ping */
+// Health & DB ping
 app.get('/health', (_req, res) =>
   res.json({ ok: true, uptime: process.uptime() })
 );
@@ -38,7 +39,7 @@ app.post('/users', async (req, res) => {
     return res.status(400).json({ error: parse.error.message });
   const { email, github_username } = parse.data;
 
-  // upsert on email; requires a unique index on users.email (recommended)
+  // upsert on email; requires a unique index on users.email
   try {
     const rows = await query(
       `
@@ -66,46 +67,8 @@ app.get('/users', async (_req, res) => {
   }
 });
 
-/** Connections */
-const ConnBody = z.object({
-  user_id: z.string().uuid(),
-  provider: z.string().min(1),
-  access_token: z.string().min(1), // store encrypted in real use!
-});
-
-app.post('/connections', async (req, res) => {
-  const parse = ConnBody.safeParse(req.body);
-  if (!parse.success)
-    return res.status(400).json({ error: parse.error.message });
-  const { user_id, provider, access_token } = parse.data;
-
-  try {
-    const rows = await query(
-      `
-      insert into connections (user_id, provider, access_token)
-      values ($1, $2, $3)
-      returning *;
-      `,
-      [user_id, provider, access_token]
-    );
-    res.status(201).json({ connection: rows[0] });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.get('/connections/:user_id', async (req, res) => {
-  const { user_id } = req.params;
-  try {
-    const rows = await query(
-      `select * from connections where user_id = $1 order by created_at desc;`,
-      [user_id]
-    );
-    res.json({ connections: rows });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
+// Mount GitHub OAuth routes at /auth/github
+app.use('/auth/github', githubAuthRouter);
 
 const port = process.env.PORT || 4000;
 app.listen(port, () => console.log(`API on http://localhost:${port}`));
