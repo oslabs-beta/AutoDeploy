@@ -1,52 +1,108 @@
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
+import { api } from "@/lib/api";
+import type { McpPipeline } from "@/types/mcp";
 
-type RunHistoryItem = {
-  id?: string;
-  status?: "queued" | "in_progress" | "success" | "failure";
-  createdAt?: string;
-  commit?: string;
-  message?: string;
-};
+type Stage = "build" | "test" | "deploy";
 
 type PipelineState = {
-  yaml: string;
-  history: RunHistoryItem[];
-  status: "" | "Generating…" | "Ready" | "Error";
-  lastError?: string;
+  // inputs to MCP
+  template: string;
+  stages: Stage[];
+  options: {
+    nodeVersion: string;
+    installCmd: string;
+    testCmd: string;
+    buildCmd: string;
+    awsRoleArn?: string;
+  };
+
+  // outputs from MCP
+  result?: McpPipeline;
+
+  // local UI state
+  roles: string[];                 
+  editing: boolean;
+  editedYaml?: string;
+  status: "idle" | "loading" | "success" | "error";
+  error?: string;
 };
 
 type PipelineActions = {
-  setYaml: (y: string) => void;
-  setHistory: (h: RunHistoryItem[]) => void;
-  prependHistory: (h: RunHistoryItem) => void;
-  setStatus: (s: PipelineState["status"]) => void;
-  setError: (msg: string) => void;
-  reset: () => void;
+  setTemplate(t: string): void;
+  toggleStage(s: Stage): void;
+  setOption<K extends keyof PipelineState["options"]>(k: K, v: PipelineState["options"][K]): void;
+
+  loadAwsRoles(): Promise<void>;
+  regenerate(payload: { repo: string; branch: string }): Promise<void>;
+  openPr(args: { repo: string; branch: string }): Promise<void>;
+
+  setEditing(b: boolean): void;
+  setEditedYaml(y: string): void;
+  resetYaml(): void;
+  resetAll(): void;
 };
 
 const initial: PipelineState = {
-  yaml: "",
-  history: [],
-  status: "",
-  lastError: undefined,
+  template: "node_app",
+  stages: ["build", "test", "deploy"],
+  options: {
+    nodeVersion: "20",
+    installCmd: "npm ci",
+    testCmd: "npm test",
+    buildCmd: "npm run build",
+  },
+  roles: [],
+  editing: false,
+  status: "idle",
 };
 
-export const usePipelineStore = create<PipelineState & PipelineActions>()(
-  persist(
-    (set) => ({
-      ...initial,
-      setYaml: (y) => set({ yaml: y }),
-      setHistory: (h) => set({ history: h }),
-      prependHistory: (h) =>
-        set((s) => ({ history: [h, ...s.history] })),
-      setStatus: (s) => set({ status: s }),
-      setError: (msg) => set({ lastError: msg, status: "Error" }),
-      reset: () => set(initial),
-    }),
-    {
-      name: "pipeline-store",
-      storage: createJSONStorage(() => localStorage),
+export const usePipelineStore = create<PipelineState & PipelineActions>()((set, get) => ({
+  ...initial,
+
+  setTemplate: (t) => set({ template: t }),
+  toggleStage: (s) => {
+    const cur = get().stages;
+    set({ stages: cur.includes(s) ? cur.filter(x => x !== s) : [...cur, s] });
+  },
+  setOption: (k, v) => set({ options: { ...get().options, [k]: v } }),
+
+  async loadAwsRoles() {
+    const { roles } = await api.listAwsRoles();
+    set({ roles });
+    const { options } = get();
+    if (!options.awsRoleArn && roles[0]) set({ options: { ...options, awsRoleArn: roles[0] } });
+  },
+
+  async regenerate({ repo, branch }) {
+    set({ status: "loading", error: undefined });
+    try {
+      const { template, stages, options } = get();
+      const data = await api.createPipeline({
+        repo, branch, service: "ci-cd-generator", template,
+        options: { ...options, stages },
+      });
+      set({ result: data, status: "success", editing: false, editedYaml: undefined });
+    } catch (e: any) {
+      set({ status: "error", error: e.message });
     }
-  )
-);
+  },
+
+  async openPr({ repo, branch }) {
+    const r = get().result;
+    const yaml = get().editedYaml ?? r?.generated_yaml;
+    const file = r?.pipeline_name || "ci.yml";
+    if (!yaml) throw new Error("No YAML to open PR with");
+    await api.openPr({
+      repo,
+      branch,
+      path: `.github/workflows/${file}`,
+      yaml,
+      title: "Add CI pipeline",
+    });
+  },
+
+  setEditing: (b) => set({ editing: b }),
+  setEditedYaml: (y) => set({ editedYaml: y }),
+  resetYaml: () => set({ editedYaml: undefined }),
+  resetAll: () => set(initial),
+}));

@@ -1,37 +1,39 @@
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
+import { api } from "@/lib/api";
+
+type JobEvent = { ts: string; level: "info" | "warn" | "error"; msg: string };
 
 type DeployState = {
-  roles: string[];
-  selectedRole: string;
-  deploymentStatus: "" | "idle" | "deploying" | "success" | "error";
+  running: boolean;
+  jobId?: string;
+  events: JobEvent[];
+  stopStream?: () => void;
 };
 
 type DeployActions = {
-  setRoles: (roles: string[]) => void;
-  setSelectedRole: (arn: string) => void;
-  setDeploymentStatus: (s: DeployState["deploymentStatus"]) => void;
-  reset: () => void;
+  startDeploy(args: { repo: string; env: "dev" | "staging" | "prod" }): Promise<void>;
+  stop(): void;
+  clear(): void;
 };
 
-const initial: DeployState = {
-  roles: [],
-  selectedRole: "",
-  deploymentStatus: "",
-};
-
-export const useDeployStore = create<DeployState & DeployActions>()(
-  persist(
-    (set) => ({
-      ...initial,
-      setRoles: (roles) => set({ roles }),
-      setSelectedRole: (arn) => set({ selectedRole: arn }),
-      setDeploymentStatus: (s) => set({ deploymentStatus: s }),
-      reset: () => set(initial),
-    }),
-    {
-      name: "deploy-store",
-      storage: createJSONStorage(() => localStorage),
-    }
-  )
-);
+export const useDeployStore = create<DeployState & DeployActions>()((set) => ({
+  running: false,
+  events: [],
+  async startDeploy({ repo, env }) {
+    set({ running: true, events: [] });
+    const { jobId } = await api.startDeploy({ repo, env });
+    const stop = api.streamJob(jobId, (e) =>
+      set((s) => ({ events: [...s.events, e] }))
+    );
+    set({ jobId, stopStream: stop });
+  },
+  stop() {
+    set((s) => {
+      s.stopStream?.();
+      return { running: false, stopStream: undefined };
+    });
+  },
+  clear() {
+    set({ running: false, jobId: undefined, events: [], stopStream: undefined });
+  },
+}));
