@@ -6,6 +6,7 @@ import morgan from 'morgan';
 import { healthCheck, query } from './db.js';
 import githubAuthRouter from './routes/auth.github.js';
 import { z } from 'zod';
+import mcpRoutes from './routes/mcp.js';
 
 const app = express();
 app.use(express.json());
@@ -66,6 +67,28 @@ app.get('/users', async (_req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
+// --- Request Logging Middleware ---
+app.use((req, res, next) => {
+  const user = req.headers["x-user-id"] || "anonymous";
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} | user=${user}`);
+  next();
+});
+
+// -- Agent entry point 
+app.use('/mcp/v1', mcpRoutes);
+
+// --- Global Error Handler ---
+app.use((err, req, res, next) => {
+  console.error("Global Error:", err);
+  res.status(500).json({
+    success: false,
+    error: "Internal Server Error",
+    message: err.message,
+  });
+});
+
+
 
 // Mount GitHub OAuth routes at /auth/github
 app.use('/auth/github', githubAuthRouter);
