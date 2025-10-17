@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { api } from "@/lib/api";
+import { api } from "../lib/api";
 
 type EnvName = "dev" | "staging" | "prod";
 type SecretRef = { key: string; present: boolean };

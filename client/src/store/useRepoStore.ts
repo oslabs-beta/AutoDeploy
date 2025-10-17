@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import { api } from "@/lib/api";
+import { api } from "../lib/api";
 
 //typescript friendly typing here for properties and functions we want our data to have
 type RepoState = {

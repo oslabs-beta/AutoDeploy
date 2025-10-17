@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { api } from "@/lib/api";
+import { api } from "../lib/api";
 import type { McpPipeline } from "@/types/mcp";
 
 type Stage = "build" | "test" | "deploy";
