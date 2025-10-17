@@ -45,6 +45,7 @@ AutoDeploy/
 │       └── github-oauth.js      # helper functions for GitHub API
     ├── routes/
 │   │   └── auth.github.js       # all GitHub OAuth + /me routes
+		└── usersRoutes
 │   ├── server.js                # Express bootstrap & route mounting
 │   ├── db.js                    # pg Pool + query() + healthCheck()
 │
