@@ -7,12 +7,20 @@ import { healthCheck, query } from './db.js';
 import githubAuthRouter from './routes/auth.github.js';
 import { z } from 'zod';
 import mcpRoutes from './routes/mcp.js';
+import agentRoutes from './routes/agent.js';
 
 const app = express();
 app.use(express.json());
 app.use(cors({ origin: true, credentials: true }));
 app.use(helmet());
 app.use(morgan('dev'));
+
+// --- Request Logging Middleware ---
+app.use((req, res, next) => {
+  const user = req.headers["x-user-id"] || "anonymous";
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} | user=${user}`);
+  next();
+});
 
 // Health & DB ping
 app.get('/health', (_req, res) =>
@@ -26,6 +34,7 @@ app.get('/db/ping', async (_req, res) => {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
+
 
 /** Users */
 const UserBody = z.object({
@@ -57,26 +66,55 @@ app.post('/users', async (req, res) => {
   }
 });
 
+// app.get('/users', async (_req, res) => {
+//   try {
+//     const rows = await query(
+//       `select * from users order by created_at desc limit 100;`
+//     );
+//     res.json({ users: rows });
+//   } catch (e) {
+//     res.status(500).json({ error: e.message });
+//   }
+// });
+
 app.get('/users', async (_req, res) => {
   try {
-    const rows = await query(
-      `select * from users order by created_at desc limit 100;`
-    );
+    const rows = await query(`
+      select 
+        u.id as user_id,
+        u.email,
+        u.github_username,
+        c.provider,
+        c.access_token,
+        c.created_at
+      from users u
+      left join connections c on u.id = c.user_id
+      order by c.created_at desc
+      limit 100;
+    `);
     res.json({ users: rows });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// --- Request Logging Middleware ---
-app.use((req, res, next) => {
-  const user = req.headers["x-user-id"] || "anonymous";
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} | user=${user}`);
-  next();
+app.get('/connections', async (_req, res) => {
+  try {
+    const rows = await query(
+      `select * from connections order by created_at desc limit 100;`
+    );
+    res.json({ connections: rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // -- Agent entry point 
+app.use('/agent', agentRoutes);
 app.use('/mcp/v1', mcpRoutes);
+
+// Mount GitHub OAuth routes at /auth/github
+app.use('/auth/github', githubAuthRouter);
 
 // --- Global Error Handler ---
 app.use((err, req, res, next) => {
@@ -87,11 +125,6 @@ app.use((err, req, res, next) => {
     message: err.message,
   });
 });
-
-
-
-// Mount GitHub OAuth routes at /auth/github
-app.use('/auth/github', githubAuthRouter);
 
 const port = process.env.PORT || 4000;
 app.listen(port, () => console.log(`API on http://localhost:${port}`));

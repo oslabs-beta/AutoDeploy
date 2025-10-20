@@ -1,6 +1,5 @@
-
-
 import { z } from "zod";
+import { query } from "../db.js";
 
 export const repo_reader = {
   name: "repo_reader",
@@ -12,27 +11,45 @@ export const repo_reader = {
     username: z.string().optional(),
   }),
 
-  // ✅ Mock handler (replace with GitHub API logic later)
-  handler: async ({ provider, username = "alex-python" }) => {
-    if (provider !== "github") {
-      throw new Error("Only GitHub provider supported in mock version");
-    }
+  handler: async ({ provider, username }) => {
+    if (provider !== "github") throw new Error("Only GitHub supported");
+
+    const res = await query(
+      `SELECT c.access_token
+       FROM users u
+       JOIN connections c ON u.id = c.user_id
+       WHERE c.provider = 'github'
+       ORDER BY c.created_at DESC
+       LIMIT 1`
+    );
+
+    const token = res[0]?.access_token;
+    if (!token) throw new Error("No GitHub access token found in DB");
+
+    const url = username
+      ? `https://api.github.com/users/${username}/repos`
+      : "https://api.github.com/user/repos";
+
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "AutoDeploy-Agent",
+      },
+    });
+
+    if (!response.ok) throw new Error(`GitHub API error: ${response.statusText}`);
+    const data = await response.json();
 
     return {
-      user: username,
+      success: true,
       provider,
-      repositories: [
-        {
-          name: "ci-cd-demo",
-          full_name: `${username}/ci-cd-demo`,
-          branches: ["main", "dev", "feature/auth"],
-        },
-        {
-          name: "askmyrepo",
-          full_name: `${username}/askmyrepo`,
-          branches: ["main", "staging"],
-        },
-      ],
+      user: username || "authenticated-user",
+      repositories: data.map(repo => ({
+        name: repo.name,
+        full_name: repo.full_name,
+        branches_url: repo.branches_url,
+      })),
       fetched_at: new Date().toISOString(),
     };
   },
