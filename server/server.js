@@ -7,6 +7,7 @@ import { healthCheck } from './db.js';
 import githubAuthRouter from './routes/auth.github.js';
 import userRouter from './routes/usersRoutes.js';
 import mcpRoutes from './routes/mcp.js';
+import deploymentsRouter from './routes/deployments.js';
 
 const app = express();
 app.use(express.json());
@@ -29,6 +30,9 @@ app.get('/db/ping', async (_req, res) => {
 
 // Mount users route at /users
 app.use('/', userRouter);
+
+// Deployments route
+app.use('/deployments', deploymentsRouter);
 
 // --- Request Logging Middleware ---
 app.use((req, res, next) => {
