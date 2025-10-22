@@ -1,35 +1,41 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+// src/App.tsx
+import { BrowserRouter, Routes, Route, Navigate, Link } from "react-router-dom";
+import ConnectPage from "./pages/ConnectPage";
+import ConfigurePage from "./pages/ConfigurePage";
+import SecretsPage from "./pages/SecretsPage";
+import DashboardPage from "./pages/DashboardPage";
+import { useRepoStore } from "./store/useRepoStore";
+import { usePipelineStore } from "./store/usePipelineStore";
 
-function App() {
-  const [count, setCount] = useState(0)
-
-  return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+function NeedRepo({ children }: { children: JSX.Element }) {
+  const { repo, branch } = useRepoStore();
+  return !repo || !branch ? <Navigate to="/connect" replace /> : children;
+}
+function NeedPipeline({ children }: { children: JSX.Element }) {
+  const { result } = usePipelineStore();
+  return !result?.generated_yaml ? <Navigate to="/configure" replace /> : children;
 }
 
-export default App
+export default function App() {
+  return (
+    <BrowserRouter>
+      <header style={{ borderBottom: "1px solid #eee", padding: "12px" }}>
+        <nav style={{ display: "flex", gap: 12, fontSize: 14 }}>
+          <Link to="/connect">1 Connect</Link>
+          <Link to="/configure">2 Configure</Link>
+          <Link to="/secrets">3 Secrets</Link>
+          <Link to="/dashboard">4 Dashboard</Link>
+        </nav>
+      </header>
+      <main style={{ padding: 16, maxWidth: 960, margin: "0 auto" }}>
+        <Routes>
+          <Route path="/" element={<Navigate to="/connect" replace />} />
+          <Route path="/connect" element={<ConnectPage />} />
+          <Route path="/configure" element={<NeedRepo><ConfigurePage /></NeedRepo>} />
+          <Route path="/secrets" element={<NeedRepo><NeedPipeline><SecretsPage /></NeedPipeline></NeedRepo>} />
+          <Route path="/dashboard" element={<NeedRepo><DashboardPage /></NeedRepo>} />
+        </Routes>
+      </main>
+    </BrowserRouter>
+  );
+}
