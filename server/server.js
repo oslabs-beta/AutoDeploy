@@ -8,12 +8,14 @@ import githubAuthRouter from './routes/auth.github.js';
 import { z } from 'zod';
 import mcpRoutes from './routes/mcp.js';
 import agentRoutes from './routes/agent.js';
+import cookieParser from 'cookie-parser';
 
 const app = express();
 app.use(express.json());
 app.use(cors({ origin: true, credentials: true }));
 app.use(helmet());
 app.use(morgan('dev'));
+app.use(cookieParser());
 
 // --- Request Logging Middleware ---
 app.use((req, res, next) => {

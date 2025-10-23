@@ -17,7 +17,10 @@ export async function exchangeCodeForToken({
 }) {
   const res = await fetch('https://github.com/login/oauth/access_token', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json', // ensures GitHub returns JSON
+    },
     body: JSON.stringify({
       client_id: clientId,
       client_secret: clientSecret,
@@ -26,6 +29,7 @@ export async function exchangeCodeForToken({
     }),
   });
   const json = await res.json();
+  console.log('[OAuth] Token exchange response:', json);
   if (!res.ok || !json.access_token) {
     throw new Error(
       `Token exchange failed: ${res.status} ${JSON.stringify(json)}`
@@ -42,6 +46,7 @@ export async function fetchGithubUser(accessToken) {
     },
   });
   const json = await res.json();
+  console.log('[OAuth] Fetch /user response:', json);
   if (!res.ok)
     throw new Error(
       `Fetch /user failed: ${res.status} ${JSON.stringify(json)}`

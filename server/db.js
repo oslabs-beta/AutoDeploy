@@ -17,7 +17,7 @@ export async function query(sql, params = []) {
   if (process.env.NODE_ENV !== 'production') {
     console.log(`SQL ${ms}ms: `, sql, params);
   }
-  return res.rows;
+  return res;
 }
 
 export async function healthCheck() {

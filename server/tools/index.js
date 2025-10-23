@@ -5,10 +5,10 @@ import { oidc_adapter } from "./oidc_adapter.js";
 import { github_adapter } from "./github_adapter.js";
 
 export const MCP_TOOLS = {
-  repo_reader,
-  pipeline_generator,
-  oidc_adapter,
-  github_adapter,
+  repo: repo_reader,
+  pipeline: pipeline_generator,
+  oidc: oidc_adapter,
+  github: github_adapter,
 };
 
 // Optional helper for dynamic access

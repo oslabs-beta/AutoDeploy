@@ -1,5 +1,6 @@
 import express from "express";
 import { MCP_TOOLS } from "../tools/index.js";
+import { requireSession } from "../lib/requireSession.js";
 
 const router = express.Router();
 
@@ -21,7 +22,7 @@ router.get("/status", (req, res) => {
 });
 
 // Dynamic route: handles any tool in registry
-router.all("/:tool_name", async (req, res) => {
+router.all("/:tool_name", requireSession, async (req, res) => {
   const { tool_name } = req.params;
   const tool = MCP_TOOLS[tool_name];
   logRequest(req, `/mcp/v1/${tool_name}`);
@@ -33,6 +34,8 @@ router.all("/:tool_name", async (req, res) => {
   try {
     // Merge query + body to handle GET or POST
     const input = { ...req.query, ...req.body };
+    // Inject authenticated user's ID before validation
+    input.user_id = req.user.user_id;
     const validatedInput = tool.input_schema.parse(input);
     const data = await tool.handler(validatedInput);
     res.json({ success: true, data });
