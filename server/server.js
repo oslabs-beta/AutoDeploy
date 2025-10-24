@@ -3,12 +3,15 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import { healthCheck, query } from './db.js';
+import { healthCheck } from './db.js';
 import githubAuthRouter from './routes/auth.github.js';
-import { z } from 'zod';
+import userRouter from './routes/usersRoutes.js';
 import mcpRoutes from './routes/mcp.js';
 import agentRoutes from './routes/agent.js';
 import cookieParser from 'cookie-parser';
+import deploymentsRouter from './routes/deployments.js';
+import { z } from 'zod';
+import { query } from './db.js';
 
 const app = express();
 app.use(express.json());
@@ -43,6 +46,8 @@ const UserBody = z.object({
   email: z.string().email(),
   github_username: z.string().min(1).optional(),
 });
+// Mount users route at /users
+app.use('/', userRouter);
 
 // Create or upsert user by email
 app.post('/users', async (req, res) => {
@@ -108,8 +113,18 @@ app.get('/connections', async (_req, res) => {
     res.json({ connections: rows });
   } catch (e) {
     res.status(500).json({ error: e.message });
-  }
-});
+  }});
+
+// // --- Request Logging Middleware ---
+// app.use((req, res, next) => {
+//   const user = req.headers['x-user-id'] || 'anonymous';
+//   console.log(
+//     `[${new Date().toISOString()}] ${req.method} ${
+//       req.originalUrl
+//     } | user=${user}`
+//   );
+//   next();
+// });
 
 // -- Agent entry point 
 app.use('/agent', agentRoutes);
@@ -120,13 +135,16 @@ app.use('/auth/github', githubAuthRouter);
 
 // --- Global Error Handler ---
 app.use((err, req, res, next) => {
-  console.error("Global Error:", err);
+  console.error('Global Error:', err);
   res.status(500).json({
     success: false,
-    error: "Internal Server Error",
+    error: 'Internal Server Error',
     message: err.message,
   });
 });
+
+// // Mount GitHub OAuth routes at /auth/github
+// app.use('/auth/github', githubAuthRouter);
 
 const port = process.env.PORT || 4000;
 app.listen(port, () => console.log(`API on http://localhost:${port}`));

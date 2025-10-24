@@ -4,9 +4,10 @@ const { Pool } = pkg;
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
+  max: parseInt(process.env.DB_POOL_MAZ || '8', 10),
+  idleTimeoutMillis: 10_00,
   ssl: {
-    rejectUnauthorized:
-      process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false' ? false : false,
+    rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false',
   },
 });
 
