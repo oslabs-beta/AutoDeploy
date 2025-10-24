@@ -127,6 +127,7 @@ app.get('/connections', async (_req, res) => {
 // });
 
 // -- Agent entry point 
+app.use('/deployments', deploymentsRouter);
 app.use('/agent', agentRoutes);
 app.use('/mcp/v1', mcpRoutes);
 
