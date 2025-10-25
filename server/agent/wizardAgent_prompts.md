@@ -18,7 +18,7 @@ Use these to fetch repositories, metadata, and details from GitHub.
 node server/agent/wizardAgent.js "What GitHub repos are available for pveazie951"
 node server/agent/wizardAgent.js "List all repos I have access to on GitHub"
 node server/agent/wizardAgent.js "Tell me about PVeazie951/google-extention-ai-summarizer"
-node server/agent/wizardAgent.js "Read the info of PVeazie951/soloProject"
+node server/agent/wizardAgent.js "Tell me about PVeazie951/google-extention-ai-summarizer"
 node server/agent/wizardAgent.js "Get branches for PVeazie951/soloProject"
 node server/agent/wizardAgent.js "List workflows for PVeazie951/soloProject"
 node server/agent/wizardAgent.js "Get recent commits for PVeazie951/google-extention-ai-summarizer"

@@ -69,13 +69,23 @@ export async function runWizardAgent(userPrompt) {
       console.log('🔧 Triggering MCP tool:', toolName);
 
       // --- Extract context dynamically from userPrompt or decision ---
-      const repoMatch = userPrompt.match(/\b([\w-]+\/[\w-]+)\b/) || decision.match(/\b([\w-]+\/[\w-]+)\b/);
-      const providerMatch = userPrompt.match(/\b(aws|jenkins|github actions|gcp|azure)\b/i) || decision.match(/\b(aws|jenkins|github actions|gcp|azure)\b/i);
-      const templateMatch = userPrompt.match(/\b(node|python|react|express|django|flask|java|go)\b/i) || decision.match(/\b(node|python|react|express|django|flask|java|go)\b/i);
+      // Prefer explicit labels like: "repo owner/name", "template node_app", "provider aws"
+      const labeledRepo = userPrompt.match(/\brepo\s+([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/i) 
+                       || decision.match(/\brepo\s+([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/i);
+      const genericRepo = (userPrompt + " " + decision).match(/\b(?!ci\/cd\b)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/);
+      const repo = (labeledRepo?.[1] || genericRepo?.[1] || null);
 
-      const repo = repoMatch ? repoMatch[0] : null;
-      const provider = providerMatch ? providerMatch[0].toLowerCase() : null;
-      const template = templateMatch ? templateMatch[0].toLowerCase() : null;
+      const labeledProvider = userPrompt.match(/\bprovider\s+(aws|jenkins|gcp|azure)\b/i) 
+                           || decision.match(/\bprovider\s+(aws|jenkins|gcp|azure)\b/i);
+      const genericProvider = userPrompt.match(/\b(aws|jenkins|github actions|gcp|azure)\b/i) 
+                           || decision.match(/\b(aws|jenkins|github actions|gcp|azure)\b/i);
+      const provider = (labeledProvider?.[1] || genericProvider?.[1] || null)?.toLowerCase().replace(/\s+/g, ' ');
+
+      const labeledTemplate = userPrompt.match(/\btemplate\s+([a-z_][a-z0-9_]+)\b/i) 
+                           || decision.match(/\btemplate\s+([a-z_][a-z0-9_]+)\b/i);
+      const genericTemplate = userPrompt.match(/\b(node_app|python_app|container_service|node|python|react|express|django|flask|java|go)\b/i) 
+                           || decision.match(/\b(node_app|python_app|container_service|node|python|react|express|django|flask|java|go)\b/i);
+      const template = (labeledTemplate?.[1] || genericTemplate?.[1] || null)?.toLowerCase();
 
       if (toolName === "repo_reader") {
         // Extract optional username, user_id, and repo info
