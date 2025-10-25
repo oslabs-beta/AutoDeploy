@@ -6,12 +6,18 @@ const { Pool } = pkg;
 console.log("🔐 DB SSL rejectUnauthorized:", process.env.DB_SSL_REJECT_UNAUTHORIZED);
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: parseInt(process.env.DB_POOL_MAZ || '8', 10),
-  idleTimeoutMillis: 10_00,
+  max: parseInt(process.env.DB_POOL_MAX || '8', 10),
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
   ssl: {
+    require: true,
     rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false',
   },
 });
+
+pool.on('error', (err) => console.error('[DB] Unexpected error on idle client', err));
 
 export async function query(sql, params = []) {
   const start = Date.now();

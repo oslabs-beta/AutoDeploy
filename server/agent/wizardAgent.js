@@ -28,7 +28,7 @@ export async function runWizardAgent(userPrompt) {
   const systemPrompt = `
   You are the MCP Wizard Agent.
   You have full access to the following connected tools and APIs:
-  - repo_reader: reads local and remote repositories
+  - repo_reader: reads local and remote repositories, useful for listing or describing repositories
   - pipeline_generator: generates CI/CD YAMLs
   - oidc_adapter: lists AWS roles or Jenkins jobs
   - github_adapter: fetches real-time GitHub repository data through an authenticated API connection
@@ -38,9 +38,11 @@ export async function runWizardAgent(userPrompt) {
   If the user asks:
   - “What repositories do I have on GitHub?” → use \`github_adapter\` with \`{ action: "repos" }\`
   - “Tell me about [username/repo]” → use \`github_adapter\` with \`{ action: "info", repo: "[username/repo]" }\`
+  - “Tell me about [username/repo] using repo_reader” → use \`repo_reader\` with \`{ username: "...", repo: "[username/repo]" }\`
   - “List branches for [username/repo]” → use \`github_adapter\` with \`{ action: "branches", repo: "[username/repo]" }\`
   - “Show recent commits for [username/repo]” → use \`github_adapter\` with \`{ action: "commits", repo: "[username/repo]" }\`
   - “List workflows for [username/repo]” → use \`github_adapter\` with \`{ action: "workflows", repo: "[username/repo]" }\`
+  - “List repos”, “List repositories”, or “repositories” → use \`repo_reader\` with optional \`{ username: "...", user_id: "..." }\`
   `;
 
   const completion = await client.chat.completions.create({
@@ -56,7 +58,7 @@ export async function runWizardAgent(userPrompt) {
 
   // Tool mapping using regex patterns
   const toolMap = {
-    repo_reader: /\brepo\b/i,
+    repo_reader: /\b(list repos|list repositories|repositories|repo_reader)\b/i,
     pipeline_generator: /\bpipeline\b/i,
     oidc_adapter: /\b(role|jenkins)\b/i,
     github_adapter: /\b(github|repo info|repository|[\w-]+\/[\w-]+)\b/i,
@@ -76,7 +78,21 @@ export async function runWizardAgent(userPrompt) {
       const template = templateMatch ? templateMatch[0].toLowerCase() : null;
 
       if (toolName === "repo_reader") {
-        return await callMCPTool("repo_reader", {});
+        // Extract optional username, user_id, and repo info
+        const usernameMatch = userPrompt.match(/\busername[:=]?\s*([\w-]+)\b/i);
+        const userIdMatch = userPrompt.match(/\buser[_ ]?id[:=]?\s*([\w-]+)\b/i);
+        const repoMatch = userPrompt.match(/\b([\w-]+\/[\w-]+)\b/);
+
+        const payload = {};
+        if (usernameMatch) payload.username = usernameMatch[1];
+        if (userIdMatch) payload.user_id = userIdMatch[1];
+        if (repoMatch) {
+          const [username, repo] = repoMatch[1].split("/");
+          payload.username = username;
+          payload.repo = `${username}/${repo}`;
+        }
+
+        return await callMCPTool("repo_reader", payload);
       }
 
       if (toolName === "pipeline_generator") {
