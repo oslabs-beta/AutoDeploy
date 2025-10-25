@@ -2,6 +2,8 @@ import 'dotenv/config';
 import pkg from 'pg';
 const { Pool } = pkg;
 
+
+console.log("🔐 DB SSL rejectUnauthorized:", process.env.DB_SSL_REJECT_UNAUTHORIZED);
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: parseInt(process.env.DB_POOL_MAZ || '8', 10),

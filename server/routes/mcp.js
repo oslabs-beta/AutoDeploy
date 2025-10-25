@@ -21,6 +21,42 @@ router.get("/status", (req, res) => {
   });
 });
 
+// --- GitHub adapter subcommands (explicit) ---
+router.all("/github/:action", requireSession, async (req, res) => {
+  logRequest(req, `/mcp/v1/github/${req.params.action}`);
+  const tool = MCP_TOOLS["github"];
+  if (!tool) {
+    return res.status(404).json({ success: false, error: "Tool 'github' not found." });
+  }
+  try {
+    const input = { ...req.query, ...req.body, action: req.params.action, user_id: req.user.user_id };
+    const validatedInput = tool.input_schema.parse(input);
+    const data = await tool.handler(validatedInput);
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error(`Error in github_adapter (${req.params.action}):`, error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Optional fallback: /mcp/v1/github -> default action 'repos'
+router.all("/github", requireSession, async (req, res) => {
+  logRequest(req, `/mcp/v1/github`);
+  const tool = MCP_TOOLS["github"];
+  if (!tool) {
+    return res.status(404).json({ success: false, error: "Tool 'github' not found." });
+  }
+  try {
+    const input = { ...req.query, ...req.body, action: req.query.action || "repos", user_id: req.user.user_id };
+    const validatedInput = tool.input_schema.parse(input);
+    const data = await tool.handler(validatedInput);
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error(`Error in github_adapter (default):`, error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Dynamic route: handles any tool in registry
 router.all("/:tool_name", requireSession, async (req, res) => {
   const { tool_name } = req.params;

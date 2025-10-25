@@ -6,7 +6,7 @@ import { github_adapter } from "./github_adapter.js";
 
 export const MCP_TOOLS = {
   repo: repo_reader,
-  pipeline: pipeline_generator,
+  pipeline_generator: pipeline_generator,
   oidc: oidc_adapter,
   github: github_adapter,
 };

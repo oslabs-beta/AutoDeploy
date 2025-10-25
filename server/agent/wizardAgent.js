@@ -5,14 +5,22 @@ import fetch from "node-fetch";
 dotenv.config();
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Helper: call MCP routes dynamically
+// Helper: call MCP routes dynamically, with error handling
 async function callMCPTool(tool, input) {
-  const response = await fetch(`http://localhost:3000/mcp/v1/${tool}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  return await response.json();
+  try {
+    const response = await fetch(`http://localhost:3000/mcp/v1/${tool}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.MCP_SESSION_TOKEN}`,
+      },
+      body: JSON.stringify(input),
+    });
+    return await response.json();
+  } catch (err) {
+    console.warn("⚠️ MCP call failed:", err.message || err);
+    return { error: "MCP server unreachable" };
+  }
 }
 
 // Wizard Agent Core
@@ -26,6 +34,13 @@ export async function runWizardAgent(userPrompt) {
   - github_adapter: fetches real-time GitHub repository data through an authenticated API connection
   Do not say that you lack access to GitHub or external data — you can retrieve this information directly through the available tools.
   Always respond with factual data from the tool response only.
+
+  If the user asks:
+  - “What repositories do I have on GitHub?” → use \`github_adapter\` with \`{ action: "repos" }\`
+  - “Tell me about [username/repo]” → use \`github_adapter\` with \`{ action: "info", repo: "[username/repo]" }\`
+  - “List branches for [username/repo]” → use \`github_adapter\` with \`{ action: "branches", repo: "[username/repo]" }\`
+  - “Show recent commits for [username/repo]” → use \`github_adapter\` with \`{ action: "commits", repo: "[username/repo]" }\`
+  - “List workflows for [username/repo]” → use \`github_adapter\` with \`{ action: "workflows", repo: "[username/repo]" }\`
   `;
 
   const completion = await client.chat.completions.create({
@@ -39,20 +54,103 @@ export async function runWizardAgent(userPrompt) {
   const decision = completion.choices[0].message.content;
   console.log("\n🤖 Agent decided:", decision);
 
-  // Basic keyword trigger (mock reasoning)
-  if (decision.toLowerCase().includes("repo")) return await callMCPTool("repo_reader", {});
-  if (decision.toLowerCase().includes("pipeline"))
-    return await callMCPTool("pipeline_generator", {
-      repo: "askmyrepo",
-      provider: "aws",
-      template: "node_app",
-    });
-  if (decision.toLowerCase().includes("role") || decision.toLowerCase().includes("jenkins"))
-    return await callMCPTool("oidc_adapter", { provider: "aws" });
-  if (decision.toLowerCase().includes("github") || decision.toLowerCase().includes("repo info"))
-    return await callMCPTool("github_adapter", { repo: "paythonveazie/sample-node-app" });
+  // Tool mapping using regex patterns
+  const toolMap = {
+    repo_reader: /\brepo\b/i,
+    pipeline_generator: /\bpipeline\b/i,
+    oidc_adapter: /\b(role|jenkins)\b/i,
+    github_adapter: /\b(github|repo info|repository|[\w-]+\/[\w-]+)\b/i,
+  };
 
-  return { message: "No matching tool found." };
+  for (const [toolName, pattern] of Object.entries(toolMap)) {
+    if (pattern.test(decision)) {
+      console.log('🔧 Triggering MCP tool:', toolName);
+
+      // --- Extract context dynamically from userPrompt or decision ---
+      const repoMatch = userPrompt.match(/\b([\w-]+\/[\w-]+)\b/) || decision.match(/\b([\w-]+\/[\w-]+)\b/);
+      const providerMatch = userPrompt.match(/\b(aws|jenkins|github actions|gcp|azure)\b/i) || decision.match(/\b(aws|jenkins|github actions|gcp|azure)\b/i);
+      const templateMatch = userPrompt.match(/\b(node|python|react|express|django|flask|java|go)\b/i) || decision.match(/\b(node|python|react|express|django|flask|java|go)\b/i);
+
+      const repo = repoMatch ? repoMatch[0] : null;
+      const provider = providerMatch ? providerMatch[0].toLowerCase() : null;
+      const template = templateMatch ? templateMatch[0].toLowerCase() : null;
+
+      if (toolName === "repo_reader") {
+        return await callMCPTool("repo_reader", {});
+      }
+
+      if (toolName === "pipeline_generator") {
+        if (!repo) {
+          console.warn("⚠️ Missing repo context for pipeline generation.");
+          return { 
+            success: false, 
+            error: "I couldn’t determine which repository you meant. Please specify it, e.g., 'generate pipeline for user/repo'." 
+          };
+        }
+
+        const payload = { repo };
+        if (provider) payload.provider = provider;
+        if (template) payload.template = template;
+
+        // Fetch GitHub repo details before pipeline generation
+        let repoInfo = null;
+        try {
+          const info = await callMCPTool("github_adapter", { action: "info", repo });
+          if (info?.data?.success) {
+            repoInfo = info.data;
+            console.log(`📦 Retrieved repo info from GitHub:`, repoInfo);
+          }
+        } catch (err) {
+          console.warn("⚠️ Failed to fetch GitHub info before pipeline generation:", err.message);
+        }
+
+        // Merge language or visibility into payload if available
+        if (repoInfo?.language && !payload.language) payload.language = repoInfo.language.toLowerCase();
+        if (repoInfo?.visibility && !payload.visibility) payload.visibility = repoInfo.visibility;
+
+        // Infer template if still missing
+        if (!payload.template) {
+          if (repoInfo?.language?.toLowerCase().includes("javascript") || repoInfo?.language?.toLowerCase().includes("typescript") || /js|ts|node|javascript/i.test(repo)) {
+            payload.template = "node_app";
+          } else if (repoInfo?.language?.toLowerCase().includes("python") || /py|flask|django/i.test(repo)) {
+            payload.template = "python_app";
+          } else {
+            payload.template = "container_service";
+          }
+          console.log(`🪄 Inferred template: ${payload.template}`);
+        }
+
+        // ✅ Ensure provider is valid before sending payload
+        if (!payload.provider || !["aws", "jenkins"].includes(payload.provider)) {
+          // Infer from repo visibility or fallback to AWS
+          payload.provider = repoInfo?.visibility === "private" ? "jenkins" : "aws";
+          console.log(`🧭 Inferred provider: ${payload.provider}`);
+        }
+
+        console.log("🧩 Final payload to pipeline_generator:", payload);
+        return await callMCPTool("pipeline_generator", payload);
+      }
+
+      if (toolName === "oidc_adapter") {
+        const payload = provider ? { provider } : {};
+        return await callMCPTool("oidc_adapter", payload);
+      }
+
+      if (toolName === "github_adapter") {
+        if (repo) {
+          return await callMCPTool("github/info", { repo });
+        } else {
+          console.warn("⚠️ Missing repo for GitHub info retrieval.");
+          return { 
+            success: false, 
+            error: "Couldn’t determine which repository to fetch. Please include it in your request (e.g., 'tell me about user/repo')." 
+          };
+        }
+      }
+    }
+  }
+
+  return { message: "No matching tool found. Try asking about a repo, pipeline, or AWS role." };
 }
 
 // Example local test (can comment out for production)
