@@ -136,6 +136,18 @@ export async function runWizardAgent(userPrompt) {
           console.log(`🪄 Inferred template: ${payload.template}`);
         }
 
+        // --- Auto-correct short template names ---
+        if (payload.template === "node") payload.template = "node_app";
+        if (payload.template === "python") payload.template = "python_app";
+        if (payload.template === "container") payload.template = "container_service";
+
+        // --- Preserve repo context globally ---
+        if (!payload.repo && globalThis.LAST_REPO_USED) {
+          payload.repo = globalThis.LAST_REPO_USED;
+        } else if (payload.repo) {
+          globalThis.LAST_REPO_USED = payload.repo;
+        }
+
         // ✅ Ensure provider is valid before sending payload
         if (!payload.provider || !["aws", "jenkins"].includes(payload.provider)) {
           // Infer from repo visibility or fallback to AWS

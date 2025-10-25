@@ -122,9 +122,26 @@ export const pipeline_generator = {
       };
     }
 
-    // Normalize repo path if only repo name is provided
+    // ✅ Normalize repo path to include username/repo format
     if (!repo.includes("/")) {
-      const githubUsername = decoded?.github_username || process.env.GITHUB_USERNAME;
+      let githubUsername = decoded?.github_username || process.env.GITHUB_USERNAME;
+      if (!githubUsername) {
+        try {
+          const { rows: userRows } = await pool.query(
+            `SELECT github_username FROM users WHERE id = $1 LIMIT 1`,
+            [userId]
+          );
+          if (userRows.length > 0) {
+            githubUsername = userRows[0].github_username;
+            console.log("🧠 Retrieved GitHub username from DB:", githubUsername);
+          } else {
+            console.warn("⚠️ No GitHub username found in DB for user:", userId);
+          }
+        } catch (dbErr) {
+          console.warn("⚠️ Failed to query DB for GitHub username:", dbErr.message);
+        }
+      }
+
       if (githubUsername) {
         repo = `${githubUsername}/${repo}`;
         console.log("🧩 Normalized repo path:", repo);
@@ -147,8 +164,13 @@ export const pipeline_generator = {
       repoInfo = null;
     }
 
+    // ✅ Normalize GitHub adapter return structure
+    if (repoInfo?.data) {
+      repoInfo = repoInfo.data;
+    }
+
     // If repo info failed, try fallback to github_adapter info or mock data
-    if (!repoInfo?.data) {
+    if (!repoInfo) {
       console.warn(`⚠️ Could not retrieve repository information for ${repo}, attempting fallback...`);
       try {
         repoInfo = await github_adapter.handler({
@@ -164,25 +186,23 @@ export const pipeline_generator = {
     }
 
     // Final safeguard: if still missing, create mock repo info to continue pipeline generation
-    if (!repoInfo?.data) {
+    if (!repoInfo) {
       console.warn("⚠️ Both primary and fallback repo info unavailable — using minimal mock data.");
       repoInfo = {
-        data: {
-          language: "JavaScript",
-          visibility: "public",
-          default_branch: branch,
-        },
+        language: "JavaScript",
+        visibility: "public",
+        default_branch: branch,
       };
     }
 
     // Determine defaults dynamically
-    const language = repoInfo.data.language || "JavaScript";
+    const language = repoInfo.language || "JavaScript";
     const inferredTemplate = language.toLowerCase().includes("python")
       ? "python_app"
       : "node_app";
 
     const inferredProvider =
-      repoInfo.data.visibility === "private" ? "jenkins" : "aws";
+      repoInfo.visibility === "private" ? "jenkins" : "aws";
 
     const selectedProvider = provider || inferredProvider;
     const selectedTemplate = template || inferredTemplate;
@@ -227,7 +247,7 @@ jobs:
         options: options || {},
         stages: ["build", "test", "deploy"],
         generated_yaml,
-        repo_info: repoInfo.data,
+        repo_info: repoInfo,
         created_at: new Date().toISOString(),
       },
     };

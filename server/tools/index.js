@@ -10,6 +10,7 @@ export const MCP_TOOLS = {
   pipeline_generator: pipeline_generator,
   oidc: oidc_adapter,
   github: github_adapter,
+  github_adapter: github_adapter,
 };
 
 // Optional helper for dynamic access
