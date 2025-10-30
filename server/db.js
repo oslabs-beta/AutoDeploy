@@ -2,13 +2,22 @@ import 'dotenv/config';
 import pkg from 'pg';
 const { Pool } = pkg;
 
+
+console.log("🔐 DB SSL rejectUnauthorized:", process.env.DB_SSL_REJECT_UNAUTHORIZED);
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
+  max: parseInt(process.env.DB_POOL_MAX || '8', 10),
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
   ssl: {
-    rejectUnauthorized:
-      process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false' ? false : false,
+    require: true,
+    rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false',
   },
 });
+
+pool.on('error', (err) => console.error('[DB] Unexpected error on idle client', err));
 
 export async function query(sql, params = []) {
   const start = Date.now();
@@ -17,7 +26,7 @@ export async function query(sql, params = []) {
   if (process.env.NODE_ENV !== 'production') {
     console.log(`SQL ${ms}ms: `, sql, params);
   }
-  return res.rows;
+  return res;
 }
 
 export async function healthCheck() {

@@ -1,3 +1,4 @@
+import jwt from 'jsonwebtoken';
 import { Router } from 'express';
 import { createState, consumeState } from '../lib/state.js';
 import {
@@ -7,6 +8,8 @@ import {
   fetchPrimaryEmail,
 } from '../lib/github-oauth.js';
 import { query } from '../db.js';
+
+const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret';
 
 const {
   GITHUB_CLIENT_ID,
@@ -27,7 +30,7 @@ router.get('/start', (req, res) => {
   const url = buildAuthorizeUrl({
     clientId: GITHUB_CLIENT_ID,
     redirectUri: GITHUB_OAUTH_REDIRECT_URI,
-    scopes: GITHUB_OAUTH_SCOPES || 'read:user user:email',
+    scopes: GITHUB_OAUTH_SCOPES || 'read:user user:email repo read:org',
     state,
   });
   return res.redirect(url);
@@ -50,6 +53,11 @@ router.get('/callback', async (req, res) => {
       redirectUri: GITHUB_OAUTH_REDIRECT_URI,
     });
 
+    if (!token || !token.access_token) {
+      console.error('[OAuth] Invalid token response:', token);
+      return res.status(500).send('OAuth error: invalid token exchange');
+    }
+
     const accessToken = token.access_token;
     const scopes = Array.isArray(token.scope)
       ? token.scope.join(' ')
@@ -57,6 +65,11 @@ router.get('/callback', async (req, res) => {
 
     // Fetch GH user
     const ghUser = await fetchGithubUser(accessToken);
+
+    if (!ghUser || !ghUser.id) {
+      console.error('[OAuth] Failed to fetch GitHub user. Response:', ghUser);
+      return res.status(500).send('OAuth error: failed to fetch GitHub user');
+    }
 
     // Email fallback
     let email = ghUser.email || null;
@@ -66,7 +79,7 @@ router.get('/callback', async (req, res) => {
     const emailForUpsert = email || `${ghUser.login}@users.noreply.github.com`;
     const githubUsername = ghUser.login;
 
-    const userRows = await query(
+    const { rows: userRows } = await query(
       `
       insert into public.users (email, github_username)
       values ($1, $2)
@@ -76,10 +89,17 @@ router.get('/callback', async (req, res) => {
       `,
       [emailForUpsert, githubUsername]
     );
+
+    console.log('[OAuth] userRows returned:', userRows);
+    if (!userRows || !userRows.length) {
+      throw new Error('No user record returned from insert');
+    }
+
     const user = userRows[0];
 
     // Upsert connection (one per provider per user)
     const provider = 'github';
+    console.log('[OAuth] ghUser object before inserting connection:', ghUser);
     const providerAccountId = String(ghUser.id);
 
     await query(
@@ -94,6 +114,20 @@ router.get('/callback', async (req, res) => {
       `,
       [user.id, provider, providerAccountId, accessToken, scopes]
     );
+
+    // Create session JWT and set as secure cookie
+    const payload = {
+      user_id: user.id,
+      github_username: user.github_username,
+      email: user.email,
+    };
+    const sessionToken = jwt.sign(payload, SESSION_SECRET, { expiresIn: '1h' });
+    res.cookie('mcp_session', sessionToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 1000, // 1 hour
+    });
 
     const redirectTo = stateData.redirectTo || '/';
     return res.redirect(redirectTo);
