@@ -4,7 +4,7 @@
   "description": "Auto-Generated Secure CI/CD Pipelines with AI + MCP",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node test/smoke.test.js",
     "dev": "nodemon server/server.js",
     "start": "node server/server.js"
   },

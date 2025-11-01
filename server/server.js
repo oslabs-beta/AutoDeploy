@@ -10,6 +10,7 @@ import mcpRoutes from './routes/mcp.js';
 import agentRoutes from './routes/agent.js';
 import cookieParser from 'cookie-parser';
 import deploymentsRouter from './routes/deployments.js';
+import authRoutes from './routes/authRoutes.js';
 import { z } from 'zod';
 import { query } from './db.js';
 
@@ -22,8 +23,12 @@ app.use(cookieParser());
 
 // --- Request Logging Middleware ---
 app.use((req, res, next) => {
-  const user = req.headers["x-user-id"] || "anonymous";
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} | user=${user}`);
+  const user = req.headers['x-user-id'] || 'anonymous';
+  console.log(
+    `[${new Date().toISOString()}] ${req.method} ${
+      req.originalUrl
+    } | user=${user}`
+  );
   next();
 });
 
@@ -39,7 +44,6 @@ app.get('/db/ping', async (_req, res) => {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
-
 
 /** Users */
 const UserBody = z.object({
@@ -113,7 +117,8 @@ app.get('/connections', async (_req, res) => {
     res.json({ connections: rows });
   } catch (e) {
     res.status(500).json({ error: e.message });
-  }});
+  }
+});
 
 // // --- Request Logging Middleware ---
 // app.use((req, res, next) => {
@@ -126,13 +131,14 @@ app.get('/connections', async (_req, res) => {
 //   next();
 // });
 
-// -- Agent entry point 
+// -- Agent entry point
 app.use('/deployments', deploymentsRouter);
 app.use('/agent', agentRoutes);
 app.use('/mcp/v1', mcpRoutes);
 
 // Mount GitHub OAuth routes at /auth/github
 app.use('/auth/github', githubAuthRouter);
+app.use(authRoutes);
 
 // --- Global Error Handler ---
 app.use((err, req, res, next) => {

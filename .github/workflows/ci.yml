@@ -18,4 +18,4 @@ jobs:
           node-version: 20
       - run: npm ci
       - run: npm test
-      - run: echo "Deploying to ${{ inputs.environment || dev }}..."
+      - run: echo "Deploying to ${{ inputs.environment || 'dev' }}..."
