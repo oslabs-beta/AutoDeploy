@@ -209,3 +209,39 @@ export async function listRepoWorkflows({ token, owner, repo }) {
   const data = await res.json();
   return data.workflows ?? [];
 }
+// Github dispatch call
+
+export async function dispatchWorkflow({
+  token,
+  owner,
+  repo,
+  workflow,
+  ref,
+  inputs = {},
+}) {
+  const url = `https://api.github.com/repos/${owner}/${repo}/actions/workflows/${encodeURIComponent(
+    workflow
+  )}/dispatches`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'OSP-CI-Builder',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ ref, inputs }),
+  });
+
+  if (res.status === 204) return { ok: true };
+
+  const text = await res.text().catch(() => '');
+  const err = new Error(
+    `Workflow dispatch failed: ${res.status} ${res.statusText} ${text}`
+  );
+  err.status = res.status;
+  try {
+    err.details = JSON.parse(text);
+  } catch {}
+  throw err;
+}
