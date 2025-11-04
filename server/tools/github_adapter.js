@@ -200,11 +200,21 @@ export async function listRepoWorkflows({ token, owner, repo }) {
       'User-Agent': 'OSP-CI-Builder',
     },
   });
+  // if (!res.ok) {
+  //   const text = await res.text().catch(() => '');
+  //   throw new Error(
+  //     `List workflows failed: ${res.status} ${res.statusText} ${text}`
+  //   );
+  // }
+
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(
-      `List workflows failed: ${res.status} ${res.statusText} ${text}`
-    );
+    console.error('[listRepoWorkflows]', {
+      status: res.status,
+      statusText: res.statusText,
+      body: text,
+    });
+    throw new Error(`List workflows failed: ${res.status} ${res.statusText}`);
   }
   const data = await res.json();
   return data.workflows ?? [];

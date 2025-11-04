@@ -336,8 +336,9 @@ router.post('/dispatch', requireSession, async (req, res) => {
     if (!userId) return res.status(401).json({ error: 'No user in session' });
 
     const token = await getGithubAccessTokenForUser(userId);
-    if (!token)
+    if (!token) {
       return res.status(401).json({ error: 'Missing GitHub token for user' });
+    }
 
     const [owner, repo] = (repoFullName || '').split('/');
     if (!owner || !repo) {
@@ -346,15 +347,32 @@ router.post('/dispatch', requireSession, async (req, res) => {
         .json({ error: 'repoFullName must look like "owner/repo"' });
     }
 
-    // Fire the workflow
+    // 1) Fire the workflow on GitHub
     await dispatchWorkflow({ token, owner, repo, workflow, ref, inputs });
 
-    // Log (adjust to your schema)
+    // 2) Log to deployment_logs using EXISTING columns
     await query(
-      `INSERT INTO deployment_logs
-         (repo_full_name, workflow_file, ref, action, actor_user_id, created_at)
-       VALUES ($1, $2, $3, 'deploy', $4, NOW())`,
-      [repoFullName, String(workflow), ref, userId]
+      `
+      INSERT INTO deployment_logs
+        (user_id, provider, repo_full_name, environment, branch,
+         status, started_at, summary, metadata)
+      VALUES ($1, $2, $3, $4, $5,
+              'queued', NOW(), $6, $7::jsonb);
+      `,
+      [
+        userId, // user_id
+        'github_actions', // provider
+        repoFullName, // repo_full_name
+        inputs?.environment ?? 'dev', // environment
+        ref, // branch
+        `Dispatch ${workflow} via API`, // summary
+        JSON.stringify({
+          workflow,
+          ref,
+          inputs: inputs ?? {},
+          source: 'api_dispatch',
+        }),
+      ]
     );
 
     return res.status(202).json({ ok: true, message: 'Workflow dispatched' });
