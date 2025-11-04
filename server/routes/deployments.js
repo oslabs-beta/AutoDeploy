@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { query } from '../db.js';
+import { dispatchWorkflow } from '../tools/github_adapter.js';
+import { getGithubAccessTokenForUser } from '../lib/github-token.js';
+import { requireSession } from '../lib/requireSession.js';
 
 const router = Router();
 
@@ -317,6 +320,69 @@ router.post('/rollback/last-success', async (req, res) => {
   } catch (e) {
     console.error('[POST /deployments/rollback/last-success] error:', e);
     return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+router.post('/dispatch', requireSession, async (req, res) => {
+  try {
+    const { repoFullName, workflow, ref, inputs } = req.body || {};
+    if (!repoFullName || !workflow || !ref) {
+      return res
+        .status(400)
+        .json({ error: 'repoFullName, workflow, and ref are required' });
+    }
+
+    const userId = req?.user?.user_id;
+    if (!userId) return res.status(401).json({ error: 'No user in session' });
+
+    const token = await getGithubAccessTokenForUser(userId);
+    if (!token) {
+      return res.status(401).json({ error: 'Missing GitHub token for user' });
+    }
+
+    const [owner, repo] = (repoFullName || '').split('/');
+    if (!owner || !repo) {
+      return res
+        .status(400)
+        .json({ error: 'repoFullName must look like "owner/repo"' });
+    }
+
+    // 1) Fire the workflow on GitHub
+    await dispatchWorkflow({ token, owner, repo, workflow, ref, inputs });
+
+    // 2) Log to deployment_logs using EXISTING columns
+    await query(
+      `
+      INSERT INTO deployment_logs
+        (user_id, provider, repo_full_name, environment, branch,
+         status, started_at, summary, metadata)
+      VALUES ($1, $2, $3, $4, $5,
+              'queued', NOW(), $6, $7::jsonb);
+      `,
+      [
+        userId, // user_id
+        'github_actions', // provider
+        repoFullName, // repo_full_name
+        inputs?.environment ?? 'dev', // environment
+        ref, // branch
+        `Dispatch ${workflow} via API`, // summary
+        JSON.stringify({
+          workflow,
+          ref,
+          inputs: inputs ?? {},
+          source: 'api_dispatch',
+        }),
+      ]
+    );
+
+    return res.status(202).json({ ok: true, message: 'Workflow dispatched' });
+  } catch (err) {
+    console.error('dispatch error:', err);
+    const status = err.status || 500;
+    return res.status(status).json({
+      error: err.message || 'Failed to dispatch workflow',
+      details: err.details || undefined,
+    });
   }
 });
 

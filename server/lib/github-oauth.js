@@ -19,7 +19,7 @@ export async function exchangeCodeForToken({
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Accept': 'application/json', // ensures GitHub returns JSON
+      Accept: 'application/json', // ensures GitHub returns JSON
     },
     body: JSON.stringify({
       client_id: clientId,
