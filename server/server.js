@@ -12,6 +12,7 @@ import cookieParser from 'cookie-parser';
 import deploymentsRouter from './routes/deployments.js';
 import { z } from 'zod';
 import { query } from './db.js';
+import jenkinsRouter from "./routes/jenkins.js";
 
 const app = express();
 app.use(express.json());
@@ -144,6 +145,7 @@ app.use((err, req, res, next) => {
   });
 });
 
+app.use('/jenkins', jenkinsRouter);
 // // Mount GitHub OAuth routes at /auth/github
 // app.use('/auth/github', githubAuthRouter);
 
