@@ -10,7 +10,7 @@ on:
         description: 'Target environment'
         required: false
         type: string
-        default: dev
+        default: 'dev'
 
 jobs:
   build:
