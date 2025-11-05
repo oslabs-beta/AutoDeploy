@@ -10,8 +10,11 @@ import mcpRoutes from './routes/mcp.js';
 import agentRoutes from './routes/agent.js';
 import cookieParser from 'cookie-parser';
 import deploymentsRouter from './routes/deployments.js';
+import authAws from './routes/auth.aws.js';
+import authGoogle from './routes/auth.google.js';
 import { z } from 'zod';
 import { query } from './db.js';
+
 
 const app = express();
 app.use(express.json());
@@ -133,6 +136,12 @@ app.use('/mcp/v1', mcpRoutes);
 
 // Mount GitHub OAuth routes at /auth/github
 app.use('/auth/github', githubAuthRouter);
+
+// Mount AWS SSO routes
+app.use('/auth/aws', authAws);
+
+// Mount Google OAuth routes
+app.use('/auth/google', authGoogle);
 
 // --- Global Error Handler ---
 app.use((err, req, res, next) => {
