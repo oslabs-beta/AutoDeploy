@@ -14,6 +14,7 @@ import authAws from './routes/auth.aws.js';
 import authGoogle from './routes/auth.google.js';
 import { z } from 'zod';
 import { query } from './db.js';
+import jenkinsRouter from "./routes/jenkins.js";
 
 
 const app = express();
@@ -25,8 +26,12 @@ app.use(cookieParser());
 
 // --- Request Logging Middleware ---
 app.use((req, res, next) => {
-  const user = req.headers["x-user-id"] || "anonymous";
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} | user=${user}`);
+  const user = req.headers['x-user-id'] || 'anonymous';
+  console.log(
+    `[${new Date().toISOString()}] ${req.method} ${
+      req.originalUrl
+    } | user=${user}`
+  );
   next();
 });
 
@@ -42,7 +47,6 @@ app.get('/db/ping', async (_req, res) => {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
-
 
 /** Users */
 const UserBody = z.object({
@@ -116,7 +120,8 @@ app.get('/connections', async (_req, res) => {
     res.json({ connections: rows });
   } catch (e) {
     res.status(500).json({ error: e.message });
-  }});
+  }
+});
 
 // // --- Request Logging Middleware ---
 // app.use((req, res, next) => {
@@ -129,13 +134,14 @@ app.get('/connections', async (_req, res) => {
 //   next();
 // });
 
-// -- Agent entry point 
+// -- Agent entry point
 app.use('/deployments', deploymentsRouter);
 app.use('/agent', agentRoutes);
 app.use('/mcp/v1', mcpRoutes);
 
 // Mount GitHub OAuth routes at /auth/github
 app.use('/auth/github', githubAuthRouter);
+app.use(authRoutes);
 
 // Mount AWS SSO routes
 app.use('/auth/aws', authAws);
@@ -153,6 +159,7 @@ app.use((err, req, res, next) => {
   });
 });
 
+app.use('/jenkins', jenkinsRouter);
 // // Mount GitHub OAuth routes at /auth/github
 // app.use('/auth/github', githubAuthRouter);
 
