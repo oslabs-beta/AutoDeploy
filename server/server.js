@@ -135,6 +135,10 @@ app.use('/mcp/v1', mcpRoutes);
 // Mount GitHub OAuth routes at /auth/github
 app.use('/auth/github', githubAuthRouter);
 
+app.use('/jenkins', jenkinsRouter);
+// // Mount GitHub OAuth routes at /auth/github
+// app.use('/auth/github', githubAuthRouter);
+
 // --- Global Error Handler ---
 app.use((err, req, res, next) => {
   console.error('Global Error:', err);
@@ -145,9 +149,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.use('/jenkins', jenkinsRouter);
-// // Mount GitHub OAuth routes at /auth/github
-// app.use('/auth/github', githubAuthRouter);
+
 
 const port = process.env.PORT || 4000;
 app.listen(port, () => console.log(`API on http://localhost:${port}`));
