@@ -26,6 +26,7 @@
     "@aws-sdk/client-sso-oidc": "^3.921.0",
     "@aws-sdk/client-sts": "^3.921.0",
     "@aws-sdk/credential-provider-sso": "^3.921.0",
+    "@openai/agents": "^0.2.1",
     "axios": "^1.12.2",
     "chalk": "^5.6.2",
     "cookie-parser": "^1.4.7",

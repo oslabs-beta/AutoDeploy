@@ -1,15 +1,39 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useRepoStore } from "../store/useRepoStore";
 import { usePipelineStore } from "../store/usePipelineStore";
 
 export default function ConfigurePage() {
   const { repo, branch } = useRepoStore();
   const pipeline = usePipelineStore();
+  const navigate = useNavigate();
 
-  // Load available AWS roles once
+  // Log on mount with repo, branch, and navigate check
   useEffect(() => {
-    pipeline.loadAwsRoles?.().catch(console.error);
+    console.log("[ConfigurePage] Mounted. Repo:", repo, "Branch:", branch);
+    if (!navigate) console.warn("[ConfigurePage] ⚠️ navigate() not initialized!");
+  }, [repo, branch, navigate]);
+
+  // Load available AWS roles once, safely
+  useEffect(() => {
+    let loaded = false;
+
+    async function init() {
+      if (loaded) return;
+      loaded = true;
+      try {
+        console.log("[ConfigurePage] Loading AWS roles once...");
+        await pipeline.loadAwsRoles?.();
+
+        // Re-read roles from store after load completes
+        const updatedRoles = usePipelineStore.getState().roles;
+        console.log("[ConfigurePage] Roles (after load):", updatedRoles);
+      } catch (err) {
+        console.error("Failed to load AWS roles:", err);
+      }
+    }
+
+    init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -22,6 +46,7 @@ export default function ConfigurePage() {
     setBusy(false);
   }
 
+  console.log("[ConfigurePage] pipeline.result:", pipeline.result);
   return (
     <section style={{ display: "grid", gap: 16 }}>
       <h1>Configure Pipeline</h1>
@@ -60,23 +85,45 @@ export default function ConfigurePage() {
 
       <label>
         AWS Role (OIDC)
-        <select value={pipeline.options.awsRoleArn ?? ""} onChange={(e)=>pipeline.setOption("awsRoleArn", e.target.value)} style={{ display: "block", padding: 8 }}>
+        <select disabled={busy} value={pipeline.options.awsRoleArn ?? ""} onChange={(e)=>pipeline.setOption("awsRoleArn", e.target.value)} style={{ display: "block", padding: 8 }}>
           <option value="">-- select --</option>
-          {pipeline.roles?.map((r) => <option key={r} value={r}>{r}</option>)}
+          {pipeline.roles?.map((r) => (
+            <option key={r.arn} value={r.arn}>
+              {r.name}
+            </option>
+          ))}
         </select>
       </label>
 
       <div style={{ display: "flex", gap: 8 }}>
         <button onClick={onGenerate} disabled={busy}>{busy ? "Generating…" : "Generate Pipeline"}</button>
-        <Link to="/secrets">
-          <button disabled={!pipeline.result?.generated_yaml}>Continue → Secrets</button>
-        </Link>
+        <button
+          onClick={() => {
+            console.log("[ConfigurePage] Navigate button clicked.");
+            console.log("[ConfigurePage] Pipeline result before navigating:", pipeline.result);
+            try {
+              navigate("/secrets", { state: { pipeline: pipeline.result } });
+              console.log("[ConfigurePage] ✅ Navigation triggered successfully.");
+            } catch (err) {
+              console.error("[ConfigurePage] ❌ Navigation failed:", err);
+            }
+          }}
+          disabled={
+            !(
+              pipeline.result?.yaml ||
+              pipeline.result?.generated_yaml ||
+              pipeline.result?.data?.generated_yaml
+            )
+          }
+        >
+          Continue → Secrets
+        </button>
       </div>
 
       <div>
         <div>YAML Preview</div>
         <pre style={{ maxHeight: 400, overflow: "auto", background: "#f6f6f6", padding: 12 }}>
-{pipeline.result?.generated_yaml ?? "Click Generate Pipeline to preview YAML…"}
+{pipeline.result?.yaml ?? pipeline.result?.generated_yaml ?? "Click Generate Pipeline to preview YAML…"}
         </pre>
       </div>
     </section>

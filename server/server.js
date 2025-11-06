@@ -15,7 +15,7 @@ import authGoogle from './routes/auth.google.js';
 import { z } from 'zod';
 import { query } from './db.js';
 import jenkinsRouter from "./routes/jenkins.js";
-
+// app.use(authRoutes);
 
 const app = express();
 app.use(express.json());
@@ -141,7 +141,7 @@ app.use('/mcp/v1', mcpRoutes);
 
 // Mount GitHub OAuth routes at /auth/github
 app.use('/auth/github', githubAuthRouter);
-app.use(authRoutes);
+
 
 // Mount AWS SSO routes
 app.use('/auth/aws', authAws);

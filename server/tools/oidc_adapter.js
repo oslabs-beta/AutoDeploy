@@ -1,5 +1,3 @@
-
-
 import { z } from "zod";
 
 export const oidc_adapter = {
@@ -13,28 +11,38 @@ export const oidc_adapter = {
 
   // ✅ Mock handler (replace with real API calls later)
   handler: async ({ provider }) => {
-    if (provider === "aws") {
-      return {
-        provider,
-        roles: [
-          { name: "mcp-deploy-role", arn: "arn:aws:iam::123456789012:role/mcp-deploy-role" },
-          { name: "mcp-staging-role", arn: "arn:aws:iam::123456789012:role/mcp-staging-role" },
-        ],
-        fetched_at: new Date().toISOString(),
-      };
-    }
+    console.log("[oidc_adapter] Handler called with provider:", provider);
+    try {
+      if (provider === "aws") {
+        const result = {
+          provider,
+          roles: [
+            { name: "mcp-deploy-role", arn: "arn:aws:iam::123456789012:role/mcp-deploy-role" },
+            { name: "mcp-staging-role", arn: "arn:aws:iam::123456789012:role/mcp-staging-role" },
+          ],
+          fetched_at: new Date().toISOString(),
+        };
+        console.log("[oidc_adapter] Returning AWS mock roles:", result);
+        return result;
+      }
 
-    if (provider === "jenkins") {
-      return {
-        provider,
-        jobs: [
-          { name: "build_main", url: "https://jenkins.example.com/job/build_main" },
-          { name: "deploy_staging", url: "https://jenkins.example.com/job/deploy_staging" },
-        ],
-        fetched_at: new Date().toISOString(),
-      };
-    }
+      if (provider === "jenkins") {
+        const result = {
+          provider,
+          jobs: [
+            { name: "build_main", url: "https://jenkins.example.com/job/build_main" },
+            { name: "deploy_staging", url: "https://jenkins.example.com/job/deploy_staging" },
+          ],
+          fetched_at: new Date().toISOString(),
+        };
+        console.log("[oidc_adapter] Returning Jenkins mock jobs:", result);
+        return result;
+      }
 
-    throw new Error("Unsupported provider");
+      throw new Error("Unsupported provider");
+    } catch (err) {
+      console.error("[oidc_adapter] Error occurred:", err);
+      throw err;
+    }
   },
 };
