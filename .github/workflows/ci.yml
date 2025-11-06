@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - main
+      - lorenc-server
 
   workflow_dispatch:
     inputs:
@@ -15,11 +16,13 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY}}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
       - run: npm ci
-      # - run: npm test
+      - run: npm test
       - run: echo "Deploying to ${{ inputs.environment || 'dev' }}..."
