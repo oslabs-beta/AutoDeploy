@@ -1,5 +1,5 @@
 export const BASE =
-  import.meta.env.VITE_API_BASE ?? "http://localhost:3333/api";
+  import.meta.env.VITE_API_BASE ?? "http://localhost:3000/api";
 
 // Derive the server base without any trailing "/api" for MCP calls
 const SERVER_BASE = BASE.replace(/\/api$/, "");
@@ -37,7 +37,7 @@ export const api = {
     const data = await mcp<{
       repositories: { name: string; full_name: string; branches?: string[] }[];
     }>("repo_reader", {});
-    const repos = (data?.repositories ?? []).map((r) => r.full_name);
+    const repos = (data?.data?.repositories ?? []).map((r) => r.full_name);
     return { repos };
   },
 
@@ -46,7 +46,7 @@ export const api = {
     const data = await mcp<{
       repositories: { name: string; full_name: string; branches?: string[] }[];
     }>("repo_reader", {});
-    const item = (data?.repositories ?? []).find((r) => r.full_name === repo);
+    const item = (data?.data?.repositories ?? []).find((r) => r.full_name === repo);
     return { branches: item?.branches ?? [] };
   },
 
@@ -204,4 +204,3 @@ function writeSecrets(repo: string, env: string, obj: Record<string, string>) {
 
 // in-memory job storage for mock deploys
 const JOBS: Map<string, any> = new Map();
-

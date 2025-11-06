@@ -13,7 +13,12 @@ function NeedRepo({ children }: { children: JSX.Element }) {
 }
 function NeedPipeline({ children }: { children: JSX.Element }) {
   const { result } = usePipelineStore();
-  return !result?.generated_yaml ? <Navigate to="/configure" replace /> : children;
+  const hasYaml =
+    result?.generated_yaml ||
+    result?.yaml ||
+    result?.data?.generated_yaml;
+
+  return !hasYaml ? <Navigate to="/configure" replace /> : children;
 }
 
 export default function App() {
