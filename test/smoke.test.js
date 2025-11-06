@@ -1,28 +1,26 @@
-// import assert from 'node:assert/strict';
-// assert.equal(1 + 1, 2, 'Math still works');
-// import '../server/server.js';
-// console.log('✅ smoke test passed');
-// import 'dotenv/config';
-// import { healthCheck } from '../server/db.js';
+import fetch from 'node-fetch';
 
-// async function main() {
-//   try {
-//     console.log('Running a smoke test');
+const port = process.env.PORT || 4000;
+const url = `http://localhost:${port}/health`;
 
-//     const ok = await healthCheck();
-//     if (!ok) {
-//       console.error("❌ Health check didn't pass");
-//       process.exit(1);
-//     }
+async function main() {
+  try {
+    console.log(`🔎 Checking API health @ ${url} ...`);
+    const res = await fetch(url);
+    const json = await res.json();
 
-//     console.log('✅ Health check passed!');
-//     process.exit(0);
-//   } catch (error) {
-//     console.error('Smoke test failed');
-//     process.exit(1);
-//   }
-// }
+    // const ok = await healthCheck();
+    if (!res.ok || !json.ok) {
+      console.error('❌ Health check didn"t pass', json);
+      process.exit(1);
+    }
 
-// main();
-console.log('✅ CI smoke test stub: nothing to check yet.');
-process.exit(0);
+    console.log('✅ Health check passed!', json);
+    process.exit(0);
+  } catch (error) {
+    console.error('❌ Smoke test failed');
+    process.exit(1);
+  }
+}
+
+main();
