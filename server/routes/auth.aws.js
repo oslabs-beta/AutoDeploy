@@ -13,12 +13,17 @@ import {
 } from "@aws-sdk/client-sso-oidc";
 
 const router = Router();
+
+// i'd set up some linting to ensure that you're catching unused variables, like the one below
+// this will be important in terms of keeping your codebase organized & professional down the line
 const SESSION_SECRET = process.env.SESSION_SECRET;
 
 // ✅ Start AWS connect flow
 router.post("/connect", requireSession, async (req, res) => {
   const { sso_start_url, sso_region, account_id, role_to_assume } = req.body;
-  const userId = req.user.id;
+  
+  // if you want to get fancy with destructuring, i'd do this personally:
+  const { user: { id: userId } } = req;
 
   // Validate required parameters
   if (!sso_start_url || typeof sso_start_url !== 'string' || sso_start_url.trim() === '') {

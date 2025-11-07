@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 dotenv.config();
 
+// definitely be sure to remove these kinds of logs in production!
 console.log("🧾 MCP_API_KEY from .env:", process.env.MCP_API_KEY);
 
 export const config = {

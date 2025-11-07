@@ -1,9 +1,13 @@
+// definitely periodically run Prettier or some other formatter on your codebase!
+
 import 'dotenv/config';
 import pkg from 'pg';
 const { Pool } = pkg;
 
-
-console.log("🔐 DB SSL rejectUnauthorized:", process.env.DB_SSL_REJECT_UNAUTHORIZED);
+console.log(
+  '🔐 DB SSL rejectUnauthorized:',
+  process.env.DB_SSL_REJECT_UNAUTHORIZED
+);
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: parseInt(process.env.DB_POOL_MAX || '8', 10),
@@ -17,7 +21,9 @@ export const pool = new Pool({
   },
 });
 
-pool.on('error', (err) => console.error('[DB] Unexpected error on idle client', err));
+pool.on('error', (err) =>
+  console.error('[DB] Unexpected error on idle client', err)
+);
 
 export async function query(sql, params = []) {
   const start = Date.now();
