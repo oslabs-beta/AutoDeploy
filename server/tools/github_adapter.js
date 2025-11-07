@@ -255,3 +255,69 @@ export async function dispatchWorkflow({
   } catch {}
   throw err;
 }
+
+// Helper function to create and update a workflow file in a repo
+export async function upsertWorkflowFile({
+  token,
+  owner,
+  repo,
+  path,
+  content,
+  branch,
+  message = 'Add CI workflow via AutoDeploy',
+}) {
+  const baseUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(
+    path
+  )}`;
+
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/vnd.github+json',
+    'User-Agent': 'OSP-CI-Builder',
+    'Content-Type': 'application/json',
+  };
+
+  //check if the file exists to get the SHA
+  let sha = undefined;
+  const getRes = await fetch(`${baseUrl}?ref=${encodeURIComponent(branch)}`, {
+    headers,
+  });
+
+  if (getRes.status === 200) {
+    const existing = await getRes.json();
+    sha = existing.sha;
+  } else if (getRes.status === 400) {
+    const text = await getRes.text().catch(() => '');
+    throw new Error(
+      `Get existing workflow failed: ${getRes.status} ${getRes.statusText} ${text}`
+    );
+  }
+
+  //Encode content as base64 character data
+  const encoded = Buffer.from(content, 'utf-8').toString('base64');
+
+  //PUT to creat/update the file
+  const body = {
+    message,
+    content: encoded,
+    branch,
+  };
+
+  if (sha) body.sha = sha;
+
+  const putRes = await fetch(baseUrl, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify(body),
+  });
+
+  if (!putRes.ok) {
+    const text = await putRes.text().catch(() => '');
+    throw new Error(
+      `Upsert workflow file failed: ${putRes.status} ${putRes.statusText} ${text}`
+    );
+  }
+
+  const data = await putRes.json();
+  return data;
+}

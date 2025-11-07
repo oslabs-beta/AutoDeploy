@@ -4,17 +4,19 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import { healthCheck } from './db.js';
-import githubAuthRouter from './routes/auth.github.js';
-import userRouter from './routes/usersRoutes.js';
 import mcpRoutes from './routes/mcp.js';
 import agentRoutes from './routes/agent.js';
-import cookieParser from 'cookie-parser';
+import githubAuthRouter from './routes/auth.github.js';
 import deploymentsRouter from './routes/deployments.js';
+import authRoutes from './routes/authRoutes.js';
+import userRouter from './routes/usersRoutes.js';
+import cookieParser from 'cookie-parser';
 import authAws from './routes/auth.aws.js';
 import authGoogle from './routes/auth.google.js';
 import { z } from 'zod';
 import { query } from './db.js';
-import jenkinsRouter from "./routes/jenkins.js";
+import jenkinsRouter from './routes/jenkins.js';
+import pipelineCommitRouter from './routes/pipelineCommit.js';
 // app.use(authRoutes);
 
 const app = express();
@@ -137,12 +139,12 @@ app.get('/connections', async (_req, res) => {
 // -- Agent entry point
 app.use('/deployments', deploymentsRouter);
 app.use('/agent', agentRoutes);
+app.use('/mcp/v1', pipelineCommitRouter);
 app.use('/mcp/v1', mcpRoutes);
 
 // Mount GitHub OAuth routes at /auth/github
 app.use('/auth/github', githubAuthRouter);
-
-
+app.use(authRoutes);
 // Mount AWS SSO routes
 app.use('/auth/aws', authAws);
 
@@ -150,8 +152,6 @@ app.use('/auth/aws', authAws);
 app.use('/auth/google', authGoogle);
 
 app.use('/jenkins', jenkinsRouter);
-// // Mount GitHub OAuth routes at /auth/github
-// app.use('/auth/github', githubAuthRouter);
 
 // --- Global Error Handler ---
 app.use((err, req, res, next) => {
@@ -162,8 +162,6 @@ app.use((err, req, res, next) => {
     message: err.message,
   });
 });
-
-
 
 const port = process.env.PORT || 4000;
 app.listen(port, () => console.log(`API on http://localhost:${port}`));
