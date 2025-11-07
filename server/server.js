@@ -1,3 +1,27 @@
+/*
+  i'd recommend organizing your imports at the top of files (here and in other files),
+  perhaps by sections separated with spaces, i.e.:
+
+  // library dependencies
+  import express from 'express'
+  import cors from 'cors'
+  import helmet from 'helmet'
+  import { z } from 'zod'
+  ...
+
+  // routes
+  import mcpRoutes from './routes/mcp.js'
+  import agentRoutes from './routes/agent.js'
+  ...
+
+  // helper functions / constants / other data / etc.
+  import { healthCheck } from './db.js'
+  import { query } from './db.js'
+  ...
+
+  all up to you how you want to do this. but i find it helps with readability and organization.
+*/
+
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
@@ -27,13 +51,17 @@ app.use(morgan('dev'));
 app.use(cookieParser());
 
 // --- Request Logging Middleware ---
-app.use((req, res, next) => {
+
+// a convention you can choose to follow is prefixing unused parameters with an underscore
+app.use((req, _res, next) => {
   const user = req.headers['x-user-id'] || 'anonymous';
   console.log(
     `[${new Date().toISOString()}] ${req.method} ${
       req.originalUrl
     } | user=${user}`
   );
+  // ^ nice logging; this is great.
+
   next();
 });
 
@@ -50,17 +78,21 @@ app.get('/db/ping', async (_req, res) => {
   }
 });
 
+// Mount users route at /users
+// ^ imo, this kind of comment is a bit useless: it's obvious to other devs what it does :)
+app.use('/', userRouter);
+
+// i'd probably put the other routes here as well.
+
 /** Users */
 const UserBody = z.object({
   email: z.string().email(),
   github_username: z.string().min(1).optional(),
 });
-// Mount users route at /users
-app.use('/', userRouter);
 
 // Create or upsert user by email
 app.post('/users', async (req, res) => {
-  const parse = UserBody.safeParse(req.body);
+  const parse = UserBody.safeParse(req.body); // love that you are doing this. great.
   if (!parse.success)
     return res.status(400).json({ error: parse.error.message });
   const { email, github_username } = parse.data;
@@ -81,6 +113,9 @@ app.post('/users', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
+// you definitely want to minimize commented-out code like below
+// if you don't need it, just remove it.
 
 // app.get('/users', async (_req, res) => {
 //   try {
@@ -125,30 +160,28 @@ app.get('/connections', async (_req, res) => {
   }
 });
 
-// // --- Request Logging Middleware ---
-// app.use((req, res, next) => {
-//   const user = req.headers['x-user-id'] || 'anonymous';
-//   console.log(
-//     `[${new Date().toISOString()}] ${req.method} ${
-//       req.originalUrl
-//     } | user=${user}`
-//   );
-//   next();
-// });
-
 // -- Agent entry point
+
+/*
+you should keep your router names consistent:
+  - deploymentsRouter
+  - agentRouter (not agentRoutes)
+  - authAwsRouter (not authAws)
+  - authGoogleRouter (not authGoogle)
+  etc.
+*/
+
+// also, i'd probably move these routes closer to the top of the file, so they're easier to find.
+
 app.use('/deployments', deploymentsRouter);
 app.use('/agent', agentRoutes);
 app.use('/mcp/v1', pipelineCommitRouter);
 app.use('/mcp/v1', mcpRoutes);
 
-// Mount GitHub OAuth routes at /auth/github
 app.use('/auth/github', githubAuthRouter);
 app.use(authRoutes);
-// Mount AWS SSO routes
 app.use('/auth/aws', authAws);
 
-// Mount Google OAuth routes
 app.use('/auth/google', authGoogle);
 
 app.use('/jenkins', jenkinsRouter);
