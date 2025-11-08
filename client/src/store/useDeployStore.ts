@@ -19,13 +19,29 @@ type DeployActions = {
 export const useDeployStore = create<DeployState & DeployActions>()((set) => ({
   running: false,
   events: [],
-  async startDeploy({ repo, env }) {
+  async startDeploy(payload: {
+    repoFullName: string;
+    branch?: string;
+    env: string;
+    yaml?: string;
+    provider?: string;
+    path?: string;
+  }) {
+    const { repoFullName, branch = "main", env, yaml, provider = "aws", path = `.github/workflows/${env}-deploy.yml` } = payload || {};
     set({ running: true, events: [] });
-    const { jobId } = await api.startDeploy({ repo, env });
-    const stop = api.streamJob(jobId, (e) =>
-      set((s) => ({ events: [...s.events, e] }))
-    );
-    set({ jobId, stopStream: stop });
+    try {
+      console.group("[useDeployStore.startDeploy] Prepared payload");
+      console.log({ repoFullName, branch, env, provider, path, yamlLength: yaml ? yaml.length : 0 });
+      console.groupEnd();
+      const { jobId } = await api.startDeploy({ repoFullName, branch, env, yaml, provider, path });
+      const stop = api.streamJob(jobId, (e) =>
+        set((s) => ({ events: [...s.events, e] }))
+      );
+      set({ jobId, stopStream: stop });
+    } catch (err) {
+      console.error("[useDeployStore.startDeploy] Error:", err);
+      set({ running: false });
+    }
   },
   stop() {
     set((s) => {
