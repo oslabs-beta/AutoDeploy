@@ -170,6 +170,7 @@ export const api = {
     }, 800);
     return () => clearInterval(timer);
   },
+
 };
 
 // Helper to start GitHub OAuth (server redirects back after callback)
@@ -204,4 +205,3 @@ function writeSecrets(repo: string, env: string, obj: Record<string, string>) {
 
 // in-memory job storage for mock deploys
 const JOBS: Map<string, any> = new Map();
-
