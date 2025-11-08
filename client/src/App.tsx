@@ -6,6 +6,7 @@ import SecretsPage from "./pages/SecretsPage";
 import DashboardPage from "./pages/DashboardPage";
 import { useRepoStore } from "./store/useRepoStore";
 import { usePipelineStore } from "./store/usePipelineStore";
+import Jenkins from "./routes/Jenkins";
 
 function NeedRepo({ children }: { children: JSX.Element }) {
   const { repo, branch } = useRepoStore();
@@ -25,6 +26,7 @@ export default function App() {
           <Link to="/configure">2 Configure</Link>
           <Link to="/secrets">3 Secrets</Link>
           <Link to="/dashboard">4 Dashboard</Link>
+          <Link to="/jenkins">5 Jenkins</Link>
         </nav>
       </header>
       <main style={{ padding: 16, maxWidth: 960, margin: "0 auto" }}>
@@ -34,6 +36,7 @@ export default function App() {
           <Route path="/configure" element={<NeedRepo><ConfigurePage /></NeedRepo>} />
           <Route path="/secrets" element={<NeedRepo><NeedPipeline><SecretsPage /></NeedPipeline></NeedRepo>} />
           <Route path="/dashboard" element={<NeedRepo><DashboardPage /></NeedRepo>} />
+          <Route path="/jenkins" element={<Jenkins />} />
         </Routes>
       </main>
     </BrowserRouter>
