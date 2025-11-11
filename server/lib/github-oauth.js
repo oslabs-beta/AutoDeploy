@@ -1,3 +1,5 @@
+// this file is great, and organized.
+
 export function buildAuthorizeUrl({ clientId, redirectUri, scopes, state }) {
   const params = new URLSearchParams({
     client_id: clientId,
