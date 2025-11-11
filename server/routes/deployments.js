@@ -354,18 +354,19 @@ router.post('/dispatch', requireSession, async (req, res) => {
     await query(
       `
       INSERT INTO deployment_logs
-        (user_id, provider, repo_full_name, environment, branch,
-         status, started_at, summary, metadata)
-      VALUES ($1, $2, $3, $4, $5,
-              'queued', NOW(), $6, $7::jsonb);
+        (user_id, provider, repo_full_name, environment, branch, action,
+          status, started_at, summary, metadata)
+      VALUES ($1, $2, $3, $4, $5, $6,
+                'queued', NOW(), $7, $8::jsonb)
       `,
       [
-        userId, // user_id
-        'github_actions', // provider
-        repoFullName, // repo_full_name
-        inputs?.environment ?? 'dev', // environment
-        ref, // branch
-        `Dispatch ${workflow} via API`, // summary
+        userId,
+        'github_actions',
+        repoFullName,
+        inputs?.environment ?? 'dev',
+        ref,
+        'dispatch',
+        `Dispatch ${workflow} via API`,
         JSON.stringify({
           workflow,
           ref,
