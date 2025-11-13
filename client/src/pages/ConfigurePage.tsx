@@ -122,7 +122,7 @@ export default function ConfigurePage() {
 
       <div>
         <div>YAML Preview</div>
-        <pre style={{ maxHeight: 400, overflow: "auto", background: "#f6f6f6", padding: 12 }}>
+        <pre style={{ maxHeight: 400, overflow: "auto", background: "#131212ff", padding: 12 }}>
 {pipeline.result?.yaml ?? pipeline.result?.generated_yaml ?? "Click Generate Pipeline to preview YAML…"}
         </pre>
       </div>

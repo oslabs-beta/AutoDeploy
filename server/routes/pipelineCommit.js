@@ -7,6 +7,8 @@ import { savePipelineVersion } from '../lib/pipelineVersions.js';
 
 const router = Router();
 
+// this is nice. consider using JSDoc at some point in the future to document your routes/functions/etc.
+// it really elevates a codebase's professionalism
 /**
  * POST /mcp/v1/pipeline_commit
  * Body:

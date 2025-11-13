@@ -18,6 +18,7 @@ type PipelineState = {
 
   // outputs from MCP
   result?: McpPipeline;
+  repoFullName?: string;
 
   // local UI state
   roles: { name: string; arn: string }[];                 
@@ -117,8 +118,16 @@ export const usePipelineStore = create<PipelineState & PipelineActions>()((set, 
         res?.generated_yaml ||
         "";
 
+      const repoFullName =
+        res?.data?.data?.repo ||
+        res?.data?.repo ||
+        "";
+
+      console.log("[usePipelineStore] Captured repoFullName:", repoFullName);
+
       set({
-        result: { ...res, yaml: generated_yaml },
+        result: { ...res, yaml: generated_yaml, generated_yaml },
+        repoFullName,
         status: "success",
         editing: false,
         editedYaml: undefined,
