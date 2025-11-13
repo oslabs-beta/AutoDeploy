@@ -7,17 +7,23 @@ import { runWizardAgent } from '../agent/wizardAgent.js';
 import { pipeline_generator } from '../tools/pipeline_generator.js';
 import { repo_reader } from '../tools/repo_reader.js';
 import { oidc_adapter } from '../tools/oidc_adapter.js';
+import { requireSession } from '../lib/requireSession.js';
 
 const router = express.Router();
 
 // Trigger full pipeline wizard (MVP agent)
-router.post('/wizard', async (req, res) => {
+router.post('/wizard', requireSession, async (req, res) => {
   try {
     const { repoUrl, provider, branch } = req.body;
     if (!repoUrl || !provider || !branch) {
       return res.status(400).json({ success: false, error: 'Missing required fields: repoUrl, provider, branch' });
     }
-    const result = await runWizardAgent({ repoUrl, provider, branch });
+    const result = await runWizardAgent({
+      repoUrl,
+      provider,
+      branch,
+      cookie: req.headers.cookie
+    });
     res.json({ success: true, data: result });
   } catch (err) {
     console.error('Wizard Error:', err);
@@ -26,13 +32,16 @@ router.post('/wizard', async (req, res) => {
 });
 
 // Trigger wizard agent with AI prompt
-router.post('/wizard/ai', async (req, res) => {
+router.post('/wizard/ai', requireSession, async (req, res) => {
   try {
     const { prompt } = req.body;
     if (!prompt) {
       return res.status(400).json({ success: false, error: 'Missing required field: prompt' });
     }
-    const result = await runWizardAgent(prompt);
+    const result = await runWizardAgent({
+      prompt,
+      cookie: req.headers.cookie
+    });
     res.json({ success: true, data: result });
   } catch (err) {
     console.error('Wizard AI Error:', err);
@@ -41,7 +50,7 @@ router.post('/wizard/ai', async (req, res) => {
 });
 
 // Generate pipeline only
-router.post('/pipeline', async (req, res) => {
+router.post('/pipeline', requireSession, async (req, res) => {
   try {
     const { repoUrl } = req.body;
     if (!repoUrl) {
@@ -59,7 +68,7 @@ router.post('/pipeline', async (req, res) => {
 });
 
 // Read repository metadata
-router.post('/analyze', async (req, res) => {
+router.post('/analyze', requireSession, async (req, res) => {
   try {
     const { repoUrl } = req.body;
     if (!repoUrl) {
@@ -73,7 +82,7 @@ router.post('/analyze', async (req, res) => {
 });
 
 // Deploy to AWS (via OIDC)
-router.post('/deploy', async (req, res) => {
+router.post('/deploy', requireSession, async (req, res) => {
   try {
     const { provider } = req.body;
     if (!provider) {
