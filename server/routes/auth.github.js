@@ -41,6 +41,8 @@ router.get('/start', (req, res) => {
   return res.redirect(url);
 });
 
+// remove commented-out code like this if you're not gonna use it
+
 // router.get('/callback', async (req, res) => {
 //   try {
 //     const { code, state } = req.query;

@@ -1,3 +1,7 @@
+/* just commenting on this file to say:
+in your /routes folder, make sure to keep your router names consistent!
+*/
+
 import express from 'express';
 import { runWizardAgent } from '../agent/wizardAgent.js';
 import { pipeline_generator } from '../tools/pipeline_generator.js';

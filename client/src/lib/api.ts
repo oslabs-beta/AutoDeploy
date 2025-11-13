@@ -219,6 +219,7 @@ async startDeploy({
     }, 600);
     return () => clearInterval(timer);
   },
+
 };
 
 // Helper to start GitHub OAuth (server redirects back after callback)
