@@ -15,7 +15,12 @@ router.post('/wizard', async (req, res) => {
   try {
     const { repoUrl, provider, branch } = req.body;
     if (!repoUrl || !provider || !branch) {
-      return res.status(400).json({ success: false, error: 'Missing required fields: repoUrl, provider, branch' });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: 'Missing required fields: repoUrl, provider, branch',
+        });
     }
     const result = await runWizardAgent({ repoUrl, provider, branch });
     res.json({ success: true, data: result });
@@ -30,12 +35,14 @@ router.post('/pipeline', async (req, res) => {
   try {
     const { repoUrl } = req.body;
     if (!repoUrl) {
-      return res.status(400).json({ success: false, error: 'Missing required field: repoUrl' });
+      return res
+        .status(400)
+        .json({ success: false, error: 'Missing required field: repoUrl' });
     }
     const yaml = await pipeline_generator.handler({
       repo: repoUrl,
       provider: 'aws',
-      template: 'node_app'
+      template: 'node_app',
     });
     res.json({ success: true, data: yaml });
   } catch (err) {
@@ -48,7 +55,9 @@ router.post('/analyze', async (req, res) => {
   try {
     const { repoUrl } = req.body;
     if (!repoUrl) {
-      return res.status(400).json({ success: false, error: 'Missing required field: repoUrl' });
+      return res
+        .status(400)
+        .json({ success: false, error: 'Missing required field: repoUrl' });
     }
     const summary = await repo_reader.handler({ repo: repoUrl });
     res.json({ success: true, data: summary });
@@ -62,7 +71,9 @@ router.post('/deploy', async (req, res) => {
   try {
     const { provider } = req.body;
     if (!provider) {
-      return res.status(400).json({ success: false, error: 'Missing required field: provider' });
+      return res
+        .status(400)
+        .json({ success: false, error: 'Missing required field: provider' });
     }
     const deployLog = await oidc_adapter.handler({ provider });
     res.json({ success: true, data: deployLog });
