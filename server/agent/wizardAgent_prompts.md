@@ -27,7 +27,7 @@ node server/agent/wizardAgent.js "Show the languages used in PVeazie951/soloProj
 
 ---
 
-## 📂 Repo Contents / Files
+## TODO 📂 Repo Contents / Files
 
 These interact with the `list_root` and `contents` actions in the GitHub adapter.
 
@@ -49,7 +49,7 @@ These prompts trigger the pipeline generator logic and repo inference system.
 ```bash
 node server/agent/wizardAgent.js "Generate a pipeline for my Node app"
 node server/agent/wizardAgent.js "Generate a CI/CD pipeline for PVeazie951/soloProject"
-node server/agent/wizardAgent.js "What kind of pipeline should I use for PVeazie951/google-extention-ai-summarizer"
+node server/agent/wizardAgent.js "What kind of CICD pipeline should I use for PVeazie951/google-extention-ai-summarizer"
 node server/agent/wizardAgent.js "Create a GitHub Actions pipeline for my soloProject repo"
 node server/agent/wizardAgent.js "What kind of deployment pipeline fits this repo"
 node server/agent/wizardAgent.js "Use Jenkins instead of GitHub Actions for deployment"
