@@ -123,14 +123,12 @@ router.get('/pipeline_history', requireSession, async (req, res) => {
     if (!repoFullName) {
       return res
         .status(400)
-        .json({ error: 'repoFUllName query param is required' });
+        .json({ error: 'repoFullName query param is required' });
     }
 
     const userId = req.user?.user_id;
     if (!userId) {
-      return res
-        .status(400)
-        .json({ error: 'userId session missing or invalid' });
+      return res.status(401).json({ error: 'User session missing or invalid' });
     }
 
     const branchName = branch || 'main';
@@ -169,6 +167,154 @@ router.get('/pipeline_history', requireSession, async (req, res) => {
     return res.status(status).json({
       error: err.message || 'Failed to fetch the pipeline commit history',
     });
+  }
+});
+
+/**
+ * POST /mcp/v1/pipeline_rollback
+ * Body:
+ *   { "versionId": "<pipeline_versions.id>" }
+ *
+ * Restores an older YAML version from pipeline_versions by:
+ *   - fetching the yaml for that version
+ *   - re-committing it to GitHub at workflow_path on branch
+ *   - logging a deployment_logs row with action='pipeline_rollback'
+ *   - saving a new pipeline_versions entry with source='pipeline_rollback'
+ */
+
+router.post('/pipeline_rollback', requireSession, async (req, res) => {
+  try {
+    const { versionId } = req.body || {};
+    if (!versionId) {
+      return res
+        .status(400)
+        .json({ error: 'Missing versionId from request body' });
+    }
+
+    const userId = req.user?.user_id;
+    if (!userId) {
+      return res.status(401).json({ error: 'User session missing or invalid' });
+    }
+
+    // Look up the pipeline version we want to restore
+
+    const versionResult = await query(
+      `
+      select
+        id,
+        user_id,
+        repo_full_name,
+        branch,
+        workflow_path,
+        yaml,
+        yaml_hash,
+        source,
+        created_at
+      from pipeline_versions
+      where id = $1
+      limit 1;
+      `,
+      [versionId]
+    );
+
+    if (!versionResult.rowCount || !versionResult.rows.length) {
+      return res
+        .status(404)
+        .json({ error: 'Pipeline version not found for give versionId' });
+    }
+
+    const version = versionResult.rows[0];
+    const {
+      repo_full_name: repoFullName,
+      branch,
+      workflow_path: workflowPath,
+      yaml,
+    } = version;
+
+    // Get github token for this user
+    const token = await getGithubAccessTokenForUser(userId);
+    if (!token) {
+      return res
+        .status(401)
+        .json({ error: 'Missing GitHub token for this user' });
+    }
+
+    const [owner, repo] = (repoFullName || '').split('/');
+    if (!owner || !repo) {
+      return res
+        .status(400)
+        .json({ error: `Invalid repo_full_name on version ${versionId}` });
+    }
+
+    //Re-commit the yaml file to GitHub (overwrite current workflow)
+    const githubResult = await upsertWorkflowFile({
+      token,
+      owner,
+      repo,
+      path: workflowPath,
+      content: yaml,
+      branch,
+      message: `Rollback pipeline to version ${versionId}`,
+    });
+
+    // Log into deployment_log as a pipeline_rollback
+    const deploymentResult = await query(
+      `
+      INSERT INTO deployment_logs
+        (user_id, provider, repo_full_name, environment, branch, action,
+         status, started_at, summary, metadata)
+      VALUES ($1, $2, $3, $4, $5, $6,
+              'success', NOW(), $7, $8::jsonb)
+      returning *;
+      `,
+      [
+        userId,
+        'github_actions',
+        repoFullName,
+        'global',
+        branch,
+        'pipeline_rollback',
+        `Rolled back pipeline to version ${versionId}`,
+        JSON.stringify({
+          workflow_path: workflowPath,
+          branch,
+          version_id: versionId,
+          commit_sha: githubResult?.commit?.sha || null,
+          commit_url: githubResult?.commit?.html_url || null,
+          source: 'pipeline_rollback',
+        }),
+      ]
+    );
+
+    const deployment = deploymentResult.rows[0];
+
+    // Save a new pipelone_versions entry representing this rollback operation
+    await savePipelineVersion({
+      userId,
+      repoFullName,
+      branch,
+      workflowPath,
+      yaml,
+      source: 'pipeline_rollback',
+    });
+
+    return res.status(201).json({
+      ok: true,
+      message: 'Pipeline rolled back successfully',
+      data: {
+        github: githubResult,
+        deployment,
+      },
+    });
+  } catch (err) {
+    console.error('[pipeline_rollback] error:', err);
+    const status = err.status || 500;
+    return res
+      .status(status)
+      .json({
+        error: err.message || 'Failed to rollback pipeline',
+        details: err.details || undefined,
+      });
   }
 });
 
