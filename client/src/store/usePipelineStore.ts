@@ -18,9 +18,10 @@ type PipelineState = {
 
   // outputs from MCP
   result?: McpPipeline;
+  repoFullName?: string;
 
   // local UI state
-  roles: string[];                 
+  roles: { name: string; arn: string }[];                 
   editing: boolean;
   editedYaml?: string;
   status: "idle" | "loading" | "success" | "error";
@@ -67,22 +68,74 @@ export const usePipelineStore = create<PipelineState & PipelineActions>()((set, 
   setOption: (k, v) => set({ options: { ...get().options, [k]: v } }),
 
   async loadAwsRoles() {
-    const { roles } = await api.listAwsRoles();
-    set({ roles });
-    const { options } = get();
-    if (!options.awsRoleArn && roles[0]) set({ options: { ...options, awsRoleArn: roles[0] } });
+    try {
+      const res = await api.listAwsRoles();
+
+      // Normalize both fetch-style and axios-style responses
+      const payload = res?.data ?? res; // if axios -> res.data, if fetch -> res
+      // Roles can live at payload.data.roles or payload.roles depending on server/helper
+      const roles =
+        payload?.data?.roles ??
+        payload?.roles ??
+        payload?.data?.data?.roles ??
+        [];
+
+      console.log("[usePipelineStore] Raw roles payload:", payload);
+      console.log("[usePipelineStore] Loaded roles (final):", roles);
+
+      // Normalize to objects even if backend returned strings
+      const normalizedRoles = roles.map((r: any) =>
+        typeof r === "string" ? { name: r.split("/").pop(), arn: r } : r
+      );
+
+      set({ roles: normalizedRoles });
+
+      const { options } = get();
+      if (!options.awsRoleArn && normalizedRoles[0]) {
+        set({ options: { ...options, awsRoleArn: normalizedRoles[0].arn } });
+      }
+    } catch (err) {
+      console.error("[usePipelineStore] Failed to load AWS roles:", err);
+      set({ roles: [] });
+    }
   },
 
   async regenerate({ repo, branch }) {
     set({ status: "loading", error: undefined });
     try {
       const { template, stages, options } = get();
-      const data = await api.createPipeline({
-        repo, branch, service: "ci-cd-generator", template,
+      const res = await api.createPipeline({
+        repo,
+        branch,
+        service: "ci-cd-generator",
+        template,
         options: { ...options, stages },
       });
-      set({ result: data, status: "success", editing: false, editedYaml: undefined });
+
+      const generated_yaml =
+        res?.data?.data?.generated_yaml ||
+        res?.data?.generated_yaml ||
+        res?.generated_yaml ||
+        "";
+
+      const repoFullName =
+        res?.data?.data?.repo ||
+        res?.data?.repo ||
+        "";
+
+      console.log("[usePipelineStore] Captured repoFullName:", repoFullName);
+
+      set({
+        result: { ...res, yaml: generated_yaml, generated_yaml },
+        repoFullName,
+        status: "success",
+        editing: false,
+        editedYaml: undefined,
+      });
+
+      console.log("[usePipelineStore] YAML generated:", generated_yaml.slice(0, 80));
     } catch (e: any) {
+      console.error("[usePipelineStore] regenerate error:", e);
       set({ status: "error", error: e.message });
     }
   },

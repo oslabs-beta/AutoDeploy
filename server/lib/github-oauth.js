@@ -1,3 +1,4 @@
+// Build the GitHub OAuth authorization URL
 export function buildAuthorizeUrl({ clientId, redirectUri, scopes, state }) {
   const params = new URLSearchParams({
     client_id: clientId,
@@ -9,6 +10,7 @@ export function buildAuthorizeUrl({ clientId, redirectUri, scopes, state }) {
   return `https://github.com/login/oauth/authorize?${params}`;
 }
 
+// Exchange OAuth authorization code for an access token
 export async function exchangeCodeForToken({
   clientId,
   clientSecret,
@@ -17,7 +19,10 @@ export async function exchangeCodeForToken({
 }) {
   const res = await fetch('https://github.com/login/oauth/access_token', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json', // ensures GitHub returns JSON
+    },
     body: JSON.stringify({
       client_id: clientId,
       client_secret: clientSecret,
@@ -26,6 +31,7 @@ export async function exchangeCodeForToken({
     }),
   });
   const json = await res.json();
+  console.log('[OAuth] Token exchange response:', json);
   if (!res.ok || !json.access_token) {
     throw new Error(
       `Token exchange failed: ${res.status} ${JSON.stringify(json)}`
@@ -34,6 +40,7 @@ export async function exchangeCodeForToken({
   return json;
 }
 
+// Fetch the authenticated GitHub user profile
 export async function fetchGithubUser(accessToken) {
   const res = await fetch('https://api.github.com/user', {
     headers: {
@@ -42,6 +49,7 @@ export async function fetchGithubUser(accessToken) {
     },
   });
   const json = await res.json();
+  console.log('[OAuth] Fetch /user response:', json);
   if (!res.ok)
     throw new Error(
       `Fetch /user failed: ${res.status} ${JSON.stringify(json)}`
@@ -49,6 +57,7 @@ export async function fetchGithubUser(accessToken) {
   return json;
 }
 
+// Fetch the user's primary email address from GitHub
 export async function fetchPrimaryEmail(accessToken) {
   const res = await fetch('https://api.github.com/user/emails', {
     headers: {

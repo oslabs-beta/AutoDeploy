@@ -7,7 +7,12 @@ import { useDeployStore } from "../store/useDeployStore";
 export default function DashboardPage() {
   const { repo } = useRepoStore();
   const { result } = usePipelineStore();
+  console.log("Debug: result.generated_yaml =", result?.generated_yaml);
   const cfg = useConfigStore();
+
+  console.log("Debug: repo =", repo);
+  console.log("Debug: cfg.env =", cfg.env);
+  console.log("Debug: result =", result);
 
   // Select stable slices from the deploy store to avoid effect loops
   const running = useDeployStore((s) => s.running);
@@ -34,7 +39,7 @@ export default function DashboardPage() {
         <div style={{ color: "#666", fontSize: 12 }}>
           {result?.pipeline_name} · Generated {result ? new Date(result.created_at).toLocaleString() : "—"}
         </div>
-        <pre style={{ maxHeight: 280, overflow: "auto", background: "#f6f6f6", padding: 12 }}>
+        <pre style={{ maxHeight: 280, overflow: "auto", background: "#1e1c1cff", padding: 12 }}>
 {result?.generated_yaml ?? "No pipeline generated yet."}
         </pre>
       </div>
@@ -42,15 +47,40 @@ export default function DashboardPage() {
       <div>
         <button
           disabled={running}
-          onClick={() => startDeploy({ repo: repo!, env: cfg.env })}
+          onClick={() => {
+            const repoFullName = result?.repo || repo;
+            const yaml = result?.generated_yaml;
+            const branch = result?.branch || "main";
+            const environment = cfg.env || "dev";
+            const provider = "aws";
+            const path = `.github/workflows/${environment}-deploy.yml`;
+
+            console.log("Deploy button clicked with payload:", {
+              repoFullName,
+              branch,
+              env: environment,
+              yaml: yaml ? yaml.slice(0, 100) + "..." : "No YAML",
+              provider,
+              path,
+            });
+
+            startDeploy({
+              repoFullName,
+              branch,
+              env: environment,
+              yaml,
+              provider,
+              path,
+            });
+          }}
         >
-          {running ? "Deploying…" : "Deploy to AWS"}
+          {running ? "Committing…" : "Commit to GitHub"}
         </button>
         {running && <button onClick={stop} style={{ marginLeft: 8 }}>Stop</button>}
       </div>
 
       <div>
-        <strong>Logs</strong>
+        <strong>Commit Logs</strong>
         <div style={{ height: 280, overflow: "auto", background: "#111", color: "#ddd", padding: 12, fontFamily: "monospace", fontSize: 12 }}>
           {events.length === 0 ? "No logs yet." :
             events.map((e, i) => (

@@ -4,7 +4,7 @@
   "description": "Auto-Generated Secure CI/CD Pipelines with AI + MCP",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node test/smoke.test.js",
     "dev": "nodemon server/server.js",
     "start": "node server/server.js"
   },
@@ -21,14 +21,27 @@
   },
   "homepage": "https://github.com/oslabs-beta/AutoDeploy#readme",
   "dependencies": {
+    "@aws-sdk/client-iam": "^3.921.0",
+    "@aws-sdk/client-s3": "^3.921.0",
+    "@aws-sdk/client-sso-oidc": "^3.921.0",
+    "@aws-sdk/client-sts": "^3.921.0",
+    "@aws-sdk/credential-provider-sso": "^3.921.0",
+    "@openai/agents": "^0.2.1",
     "axios": "^1.12.2",
+    "chalk": "^5.6.2",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
+    "googleapis": "^164.1.0",
     "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.1",
+    "node-fetch": "^3.3.2",
+    "openai": "^6.4.0",
+    "ora": "^9.0.0",
     "pg": "^8.16.3",
-    "zod": "^4.1.12"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"

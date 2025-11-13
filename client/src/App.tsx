@@ -6,6 +6,7 @@ import SecretsPage from "./pages/SecretsPage";
 import DashboardPage from "./pages/DashboardPage";
 import { useRepoStore } from "./store/useRepoStore";
 import { usePipelineStore } from "./store/usePipelineStore";
+import Jenkins from "./routes/Jenkins";
 
 function NeedRepo({ children }: { children: JSX.Element }) {
   const { repo, branch } = useRepoStore();
@@ -13,7 +14,12 @@ function NeedRepo({ children }: { children: JSX.Element }) {
 }
 function NeedPipeline({ children }: { children: JSX.Element }) {
   const { result } = usePipelineStore();
-  return !result?.generated_yaml ? <Navigate to="/configure" replace /> : children;
+  const hasYaml =
+    result?.generated_yaml ||
+    result?.yaml ||
+    result?.data?.generated_yaml;
+
+  return !hasYaml ? <Navigate to="/configure" replace /> : children;
 }
 
 export default function App() {
@@ -25,6 +31,7 @@ export default function App() {
           <Link to="/configure">2 Configure</Link>
           <Link to="/secrets">3 Secrets</Link>
           <Link to="/dashboard">4 Dashboard</Link>
+          <Link to="/jenkins">5 Jenkins</Link>
         </nav>
       </header>
       <main style={{ padding: 16, maxWidth: 960, margin: "0 auto" }}>
@@ -34,6 +41,7 @@ export default function App() {
           <Route path="/configure" element={<NeedRepo><ConfigurePage /></NeedRepo>} />
           <Route path="/secrets" element={<NeedRepo><NeedPipeline><SecretsPage /></NeedPipeline></NeedRepo>} />
           <Route path="/dashboard" element={<NeedRepo><DashboardPage /></NeedRepo>} />
+          <Route path="/jenkins" element={<Jenkins />} />
         </Routes>
       </main>
     </BrowserRouter>
