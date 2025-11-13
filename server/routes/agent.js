@@ -21,6 +21,21 @@ router.post('/wizard', async (req, res) => {
   }
 });
 
+// Trigger wizard agent with AI prompt
+router.post('/wizard/ai', async (req, res) => {
+  try {
+    const { prompt } = req.body;
+    if (!prompt) {
+      return res.status(400).json({ success: false, error: 'Missing required field: prompt' });
+    }
+    const result = await runWizardAgent(prompt);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    console.error('Wizard AI Error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Generate pipeline only
 router.post('/pipeline', async (req, res) => {
   try {

@@ -49,7 +49,7 @@ export async function runWizardAgent(userPrompt) {
     model: "gpt-4o-mini",
     messages: [
       { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
+      { role: "user", content: typeof userPrompt === "string" ? userPrompt : userPrompt.prompt },
     ],
   });
 
