@@ -14,7 +14,9 @@ router.post("/ask", async (req, res) => {
   try {
     const { question, mcpUrl, token } = req.body;
     if (!question) {
-      return res.status(400).json({ error: "Missing 'question' field in body" });
+      return res
+        .status(400)
+        .json({ error: "Missing 'question' field in body" });
     }
 
     console.log(`[JENKINS ASK] ${question}`);
@@ -26,8 +28,8 @@ router.post("/ask", async (req, res) => {
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
-    console.error("Error in /jenkins/ask:", err);
-    res.status(500).json({ error: err.message || "Internal server error" });
+    console.error('Error in /jenkins/ask:', err);
+    res.status(500).json({ error: err.message || 'Internal server error' });
   }
 });
 

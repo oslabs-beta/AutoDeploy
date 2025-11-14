@@ -1,20 +1,18 @@
+// Middleware to validate the user's JWT session cookie
 import jwt from 'jsonwebtoken';
 
-const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret';
-
+// Ensures a valid mcp_session JWT is present; attaches decoded user to req
 export function requireSession(req, res, next) {
-  let token = req.cookies?.mcp_session;
-  if (!token && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
-    token = req.headers.authorization.slice(7);
-  }
-  if (!token) return res.status(401).json({ error: 'No session token' });
+  const raw = req.cookies?.mcp_session;
+
+  if (!raw) return res.status(401).json({ error: 'No session' });
 
   try {
-    const decoded = jwt.verify(token, SESSION_SECRET);
-    req.user = decoded;
-    next();
-  } catch (err) {
-    console.error('Session verify failed', err);
+    const user = jwt.verify(raw, process.env.JWT_SECRET);
+    req.user = user;
+    return next();
+  } catch (e) {
+    console.error('[requireSession] verify failed:', e.message);
     return res.status(401).json({ error: 'Invalid or expired session' });
   }
 }

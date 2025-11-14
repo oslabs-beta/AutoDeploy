@@ -1,6 +1,10 @@
+// Deployment logs API: create, update, retry, rollback, and dispatch workflows
 import { Router } from 'express';
 import { z } from 'zod';
 import { query } from '../db.js';
+import { dispatchWorkflow } from '../tools/github_adapter.js';
+import { getGithubAccessTokenForUser } from '../lib/github-token.js';
+import { requireSession } from '../lib/requireSession.js';
 
 const router = Router();
 
@@ -23,7 +27,7 @@ const StatusBody = z.object({
   metadata: z.record(z.string(), z.any()).optional(),
 });
 
-// Create a deployment (queued)
+// Create a new deployment entry in queued status
 router.post('/', async (req, res) => {
   const parsed = CreateBody.safeParse(req.body);
   if (!parsed.success)
@@ -68,7 +72,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Update status (and optionally finish) + merge metadata
+// Update status and optionally merge metadata
 router.patch('/:id/status', async (req, res) => {
   const { id } = req.params;
   const parsed = StatusBody.safeParse(req.body);
@@ -81,7 +85,6 @@ router.patch('/:id/status', async (req, res) => {
   const sets = [
     `status = $1`,
     `summary = coalesce($2, summary)`,
-    // merge metadata: existing || new (right-hand wins)
     `metadata = coalesce(metadata, '{}'::jsonb) || coalesce($3::jsonb, '{}'::jsonb)`,
   ];
   const vals = [
@@ -108,7 +111,7 @@ router.patch('/:id/status', async (req, res) => {
   }
 });
 
-// Get deployments (filterable)
+// Get deployments with optional filters (repo, environment, status)
 router.get('/', async (req, res) => {
   const { repo_full_name, environment, status, limit = '50' } = req.query;
 
@@ -150,7 +153,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Get one deployment
+// Fetch a single deployment by ID
 router.get('/:id', async (req, res) => {
   try {
     const rows = await query(
@@ -166,7 +169,7 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-/** ---------- Retry an existing deployment by id ---------- **/
+// Retry a previous deployment by cloning its metadata
 router.post('/:id/retry', async (req, res) => {
   try {
     const [orig] = await query(
@@ -206,7 +209,7 @@ router.post('/:id/retry', async (req, res) => {
   }
 });
 
-/** ---------- Rollback to a commit (explicit) ---------- **/
+// Create an explicit rollback to a known-good commit
 const RollbackBody = z.object({
   repo_full_name: z.string().min(3),
   environment: z.string().min(1),
@@ -243,7 +246,7 @@ router.post('/rollback', async (req, res) => {
       [
         repo_full_name,
         environment,
-        branch, // ✅ we’re now including branch in the insert
+        branch,
         commit_sha,
         summary ?? `Rollback to ${commit_sha}`,
         JSON.stringify(metadata ?? {}),
@@ -261,7 +264,7 @@ router.post('/rollback', async (req, res) => {
   }
 });
 
-/** ---------- Rollback to last success (auto) ---------- **/
+// Auto-rollback to the most recent successful deployment
 const AutoRollbackBody = z.object({
   repo_full_name: z.string().min(3),
   environment: z.string().min(1),
@@ -317,6 +320,71 @@ router.post('/rollback/last-success', async (req, res) => {
   } catch (e) {
     console.error('[POST /deployments/rollback/last-success] error:', e);
     return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Dispatch a GitHub Actions workflow and log it as deployment entry
+router.post('/dispatch', requireSession, async (req, res) => {
+  try {
+    const { repoFullName, workflow, ref, inputs } = req.body || {};
+    if (!repoFullName || !workflow || !ref) {
+      return res
+        .status(400)
+        .json({ error: 'repoFullName, workflow, and ref are required' });
+    }
+
+    const userId = req?.user?.user_id;
+    if (!userId) return res.status(401).json({ error: 'No user in session' });
+
+    const token = await getGithubAccessTokenForUser(userId);
+    if (!token) {
+      return res.status(401).json({ error: 'Missing GitHub token for user' });
+    }
+
+    const [owner, repo] = (repoFullName || '').split('/');
+    if (!owner || !repo) {
+      return res
+        .status(400)
+        .json({ error: 'repoFullName must look like "owner/repo"' });
+    }
+
+    // Fire the workflow on GitHub
+    await dispatchWorkflow({ token, owner, repo, workflow, ref, inputs });
+
+    // Log to deployment_logs using EXISTING columns
+    await query(
+      `
+      INSERT INTO deployment_logs
+        (user_id, provider, repo_full_name, environment, branch, action,
+          status, started_at, summary, metadata)
+      VALUES ($1, $2, $3, $4, $5, $6,
+                'queued', NOW(), $7, $8::jsonb)
+      `,
+      [
+        userId,
+        'github_actions',
+        repoFullName,
+        inputs?.environment ?? 'dev',
+        ref,
+        'dispatch',
+        `Dispatch ${workflow} via API`,
+        JSON.stringify({
+          workflow,
+          ref,
+          inputs: inputs ?? {},
+          source: 'api_dispatch',
+        }),
+      ]
+    );
+
+    return res.status(202).json({ ok: true, message: 'Workflow dispatched' });
+  } catch (err) {
+    console.error('dispatch error:', err);
+    const status = err.status || 500;
+    return res.status(status).json({
+      error: err.message || 'Failed to dispatch workflow',
+      details: err.details || undefined,
+    });
   }
 });
 

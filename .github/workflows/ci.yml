@@ -1,0 +1,30 @@
+name: CI
+on:
+  push:
+    branches:
+      - main
+      - lorenc-server
+
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: false
+        type: string
+        default: 'dev'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY}}
+      PORT: 4000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm run start & sleep 3
+      - run: npm test
+      - run: echo "Deploying to ${{ inputs.environment || 'dev' }}..."

@@ -91,6 +91,24 @@ export const repo_reader = {
           console.error("Unexpected GitHub API response format for repo list:", data);
           return { success: false, data: null, error: "Unexpected GitHub API response format" };
         }
+
+        for (const r of data) {
+          try {
+            const branchesRes = await fetch(r.branches_url.replace("{/branch}", ""), {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: "application/vnd.github+json",
+                "User-Agent": "AutoDeploy-Agent",
+              },
+            });
+            const branchesData = await branchesRes.json();
+            r.branches = Array.isArray(branchesData) ? branchesData.map(b => b.name) : [];
+          } catch (err) {
+            console.error("Failed to fetch branches for repo:", r.full_name, err);
+            r.branches = [];
+          }
+        }
+
         return {
           success: true,
           data: {
@@ -104,6 +122,7 @@ export const repo_reader = {
               language: repo.language,
               private: repo.private,
               html_url: repo.html_url,
+              branches: repo.branches,
             })),
             fetched_at: new Date().toISOString(),
           },

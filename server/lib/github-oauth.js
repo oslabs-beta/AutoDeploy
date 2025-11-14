@@ -1,3 +1,4 @@
+// Build the GitHub OAuth authorization URL
 export function buildAuthorizeUrl({ clientId, redirectUri, scopes, state }) {
   const params = new URLSearchParams({
     client_id: clientId,
@@ -9,6 +10,7 @@ export function buildAuthorizeUrl({ clientId, redirectUri, scopes, state }) {
   return `https://github.com/login/oauth/authorize?${params}`;
 }
 
+// Exchange OAuth authorization code for an access token
 export async function exchangeCodeForToken({
   clientId,
   clientSecret,
@@ -19,7 +21,7 @@ export async function exchangeCodeForToken({
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Accept': 'application/json', // ensures GitHub returns JSON
+      Accept: 'application/json', // ensures GitHub returns JSON
     },
     body: JSON.stringify({
       client_id: clientId,
@@ -38,6 +40,7 @@ export async function exchangeCodeForToken({
   return json;
 }
 
+// Fetch the authenticated GitHub user profile
 export async function fetchGithubUser(accessToken) {
   const res = await fetch('https://api.github.com/user', {
     headers: {
@@ -54,6 +57,7 @@ export async function fetchGithubUser(accessToken) {
   return json;
 }
 
+// Fetch the user's primary email address from GitHub
 export async function fetchPrimaryEmail(accessToken) {
   const res = await fetch('https://api.github.com/user/emails', {
     headers: {

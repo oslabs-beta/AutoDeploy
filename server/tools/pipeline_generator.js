@@ -1,22 +1,23 @@
-import { github_adapter } from "./github_adapter.js";
+import { github_adapter } from './github_adapter.js';
 
-import { pool } from "../db.js";
+import { pool } from '../db.js';
 
-import jwt from "jsonwebtoken";
+import jwt from 'jsonwebtoken';
 
-import { z } from "zod";
-import { requireSession } from "../lib/requireSession.js";
+import { z } from 'zod';
+import { requireSession } from '../lib/requireSession.js';
 
 export const pipeline_generator = {
-  name: "pipeline_generator",
-  description: "Generate a mock CI/CD YAML configuration for a given repository and provider.",
+  name: 'pipeline_generator',
+  description:
+    'Generate a mock CI/CD YAML configuration for a given repository and provider.',
 
   // ✅ Input schema for validation
   input_schema: z.object({
     repo: z.string(),
-    branch: z.string().default("main"),
-    provider: z.enum(["aws", "jenkins"]),
-    template: z.enum(["node_app", "python_app", "container_service"]),
+    branch: z.string().default('main'),
+    provider: z.enum(['aws', 'jenkins']),
+    template: z.enum(['node_app', 'python_app', 'container_service']),
     options: z
       .object({
         run_tests: z.boolean().default(true),
@@ -27,7 +28,7 @@ export const pipeline_generator = {
   }),
 
   // Real handler (queries github_adapter for repo info and generates pipeline config)
-  handler: async ({ repo, branch = "main", provider, template, options }) => {
+  handler: async ({ repo, branch = 'main', provider, template, options }) => {
     const sessionToken = process.env.MCP_SESSION_TOKEN;
     let decoded = {};
     let userId = null;
@@ -37,10 +38,10 @@ export const pipeline_generator = {
       const sessionData = await requireSession();
       if (sessionData?.user?.id) {
         userId = sessionData.user.id;
-        console.log("🧩 Resolved user_id from session:", userId);
+        console.log('🧩 Resolved user_id from session:', userId);
       }
     } catch {
-      console.warn("⚠️ No active session found, trying token decode...");
+      console.warn('⚠️ No active session found, trying token decode...');
     }
 
     // Fallback: decode MCP_SESSION_TOKEN if no user found
@@ -48,20 +49,22 @@ export const pipeline_generator = {
       try {
         decoded = jwt.decode(sessionToken);
         userId = decoded?.user?.id || decoded?.sub || null;
-        if (userId) console.log("🧠 Resolved user_id from decoded token:", userId);
+        if (userId)
+          console.log('🧠 Resolved user_id from decoded token:', userId);
       } catch (err) {
-        console.warn("⚠️ Could not decode MCP_SESSION_TOKEN:", err.message);
+        console.warn('⚠️ Could not decode MCP_SESSION_TOKEN:', err.message);
       }
     }
 
     if (!userId) {
-      console.warn("⚠️ Could not resolve user_id — defaulting to anonymous.");
-      userId = "00000000-0000-0000-0000-000000000000";
+      console.warn('⚠️ Could not resolve user_id — defaulting to anonymous.');
+      userId = '00000000-0000-0000-0000-000000000000';
     }
 
     // 🧠 Try to resolve user_id from GitHub username if still anonymous
-    if (userId === "00000000-0000-0000-0000-000000000000") {
-      let githubUsername = decoded?.github_username || process.env.GITHUB_USERNAME || null;
+    if (userId === '00000000-0000-0000-0000-000000000000') {
+      let githubUsername =
+        decoded?.github_username || process.env.GITHUB_USERNAME || null;
 
       if (githubUsername) {
         try {
@@ -72,15 +75,21 @@ export const pipeline_generator = {
 
           if (userRows.length > 0) {
             userId = userRows[0].id;
-            console.log("🔄 Resolved user_id from github_username:", userId);
+            console.log('🔄 Resolved user_id from github_username:', userId);
           } else {
-            console.warn("⚠️ No user found in DB matching github_username:", githubUsername);
+            console.warn(
+              '⚠️ No user found in DB matching github_username:',
+              githubUsername
+            );
           }
         } catch (err) {
-          console.warn("⚠️ Failed to resolve user_id from github_username:", err.message);
+          console.warn(
+            '⚠️ Failed to resolve user_id from github_username:',
+            err.message
+          );
         }
       } else {
-        console.warn("⚠️ No GitHub username available to resolve user_id.");
+        console.warn('⚠️ No GitHub username available to resolve user_id.');
       }
     }
 
@@ -98,12 +107,12 @@ export const pipeline_generator = {
 
       if (rows.length > 0 && rows[0].access_token) {
         githubToken = rows[0].access_token;
-        console.log("🗝️ GitHub token retrieved from DB for user:", userId);
+        console.log('🗝️ GitHub token retrieved from DB for user:', userId);
       } else {
-        console.warn("⚠️ No GitHub access token found for user:", userId);
+        console.warn('⚠️ No GitHub access token found for user:', userId);
       }
     } catch (dbErr) {
-      console.warn("⚠️ DB lookup failed:", dbErr.message);
+      console.warn('⚠️ DB lookup failed:', dbErr.message);
     }
 
     if (!githubToken) {
@@ -113,18 +122,22 @@ export const pipeline_generator = {
         (globalThis.MCP_SESSION?.github_token ?? null);
     }
 
-    console.log("🪶 Using GitHub token from source:", githubToken ? "available" : "missing");
+    console.log(
+      '🪶 Using GitHub token from source:',
+      githubToken ? 'available' : 'missing'
+    );
 
     if (!githubToken) {
       return {
         success: false,
-        error: "No GitHub access token found for this user.",
+        error: 'No GitHub access token found for this user.',
       };
     }
 
     // ✅ Normalize repo path to include username/repo format
-    if (!repo.includes("/")) {
-      let githubUsername = decoded?.github_username || process.env.GITHUB_USERNAME;
+    if (!repo.includes('/')) {
+      let githubUsername =
+        decoded?.github_username || process.env.GITHUB_USERNAME;
       if (!githubUsername) {
         try {
           const { rows: userRows } = await pool.query(
@@ -133,20 +146,28 @@ export const pipeline_generator = {
           );
           if (userRows.length > 0) {
             githubUsername = userRows[0].github_username;
-            console.log("🧠 Retrieved GitHub username from DB:", githubUsername);
+            console.log(
+              '🧠 Retrieved GitHub username from DB:',
+              githubUsername
+            );
           } else {
-            console.warn("⚠️ No GitHub username found in DB for user:", userId);
+            console.warn('⚠️ No GitHub username found in DB for user:', userId);
           }
         } catch (dbErr) {
-          console.warn("⚠️ Failed to query DB for GitHub username:", dbErr.message);
+          console.warn(
+            '⚠️ Failed to query DB for GitHub username:',
+            dbErr.message
+          );
         }
       }
 
       if (githubUsername) {
         repo = `${githubUsername}/${repo}`;
-        console.log("🧩 Normalized repo path:", repo);
+        console.log('🧩 Normalized repo path:', repo);
       } else {
-        console.warn("⚠️ Cannot normalize repo path: no GitHub username found.");
+        console.warn(
+          '⚠️ Cannot normalize repo path: no GitHub username found.'
+        );
       }
     }
 
@@ -154,13 +175,13 @@ export const pipeline_generator = {
     let repoInfo;
     try {
       repoInfo = await github_adapter.handler({
-        action: "get_repo",
+        action: 'get_repo',
         user_id: userId,
         repo,
-        token: githubToken
+        token: githubToken,
       });
     } catch (err) {
-      console.warn("⚠️ GitHub API fetch failed:", err.message);
+      console.warn('⚠️ GitHub API fetch failed:', err.message);
       repoInfo = null;
     }
 
@@ -171,38 +192,45 @@ export const pipeline_generator = {
 
     // If repo info failed, try fallback to github_adapter info or mock data
     if (!repoInfo) {
-      console.warn(`⚠️ Could not retrieve repository information for ${repo}, attempting fallback...`);
+      console.warn(
+        `⚠️ Could not retrieve repository information for ${repo}, attempting fallback...`
+      );
       try {
         repoInfo = await github_adapter.handler({
-          action: "info",
+          action: 'info',
           user_id: userId,
           repo,
-          token: githubToken
+          token: githubToken,
         });
-        console.log("🧠 Fallback repo info retrieved successfully.");
+        console.log('🧠 Fallback repo info retrieved successfully.');
       } catch (fallbackErr) {
-        console.warn("⚠️ Fallback GitHub info retrieval failed:", fallbackErr.message);
+        console.warn(
+          '⚠️ Fallback GitHub info retrieval failed:',
+          fallbackErr.message
+        );
       }
     }
 
     // Final safeguard: if still missing, create mock repo info to continue pipeline generation
     if (!repoInfo) {
-      console.warn("⚠️ Both primary and fallback repo info unavailable — using minimal mock data.");
+      console.warn(
+        '⚠️ Both primary and fallback repo info unavailable — using minimal mock data.'
+      );
       repoInfo = {
-        language: "JavaScript",
-        visibility: "public",
+        language: 'JavaScript',
+        visibility: 'public',
         default_branch: branch,
       };
     }
 
     // Determine defaults dynamically
-    const language = repoInfo.language || "JavaScript";
-    const inferredTemplate = language.toLowerCase().includes("python")
-      ? "python_app"
-      : "node_app";
+    const language = repoInfo.language || 'JavaScript';
+    const inferredTemplate = language.toLowerCase().includes('python')
+      ? 'python_app'
+      : 'node_app';
 
     const inferredProvider =
-      repoInfo.visibility === "private" ? "jenkins" : "aws";
+      repoInfo.visibility === 'private' ? 'jenkins' : 'aws';
 
     const selectedProvider = provider || inferredProvider;
     const selectedTemplate = template || inferredTemplate;
@@ -220,12 +248,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup ${selectedTemplate === "node_app" ? "Node.js" : "Python"}
-        uses: actions/setup-${selectedTemplate === "node_app" ? "node" : "python"}@v4
+      - name: Setup ${selectedTemplate === 'node_app' ? 'Node.js' : 'Python'}
+        uses: actions/setup-${
+          selectedTemplate === 'node_app' ? 'node' : 'python'
+        }@v4
       - name: Install Dependencies
-        run: ${selectedTemplate === "node_app" ? "npm ci" : "pip install -r requirements.txt"}
+        run: ${
+          selectedTemplate === 'node_app'
+            ? 'npm ci'
+            : 'pip install -r requirements.txt'
+        }
       - name: Run Tests
-        run: ${selectedTemplate === "node_app" ? "npm test" : "pytest"}
+        run: ${selectedTemplate === 'node_app' ? 'npm test' : 'pytest'}
   deploy:
     needs: build
     runs-on: ubuntu-latest
@@ -245,7 +279,7 @@ jobs:
         provider: selectedProvider,
         template: selectedTemplate,
         options: options || {},
-        stages: ["build", "test", "deploy"],
+        stages: ['build', 'test', 'deploy'],
         generated_yaml,
         repo_info: repoInfo,
         created_at: new Date().toISOString(),

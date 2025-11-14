@@ -1,5 +1,7 @@
+import { usePipelineStore } from "../store/usePipelineStore";
+
 export const BASE =
-  import.meta.env.VITE_API_BASE ?? "http://localhost:3333/api";
+  import.meta.env.VITE_API_BASE ?? "http://localhost:3000/api";
 
 // Derive the server base without any trailing "/api" for MCP calls
 const SERVER_BASE = BASE.replace(/\/api$/, "");
@@ -37,7 +39,7 @@ export const api = {
     const data = await mcp<{
       repositories: { name: string; full_name: string; branches?: string[] }[];
     }>("repo_reader", {});
-    const repos = (data?.repositories ?? []).map((r) => r.full_name);
+    const repos = (data?.data?.repositories ?? []).map((r) => r.full_name);
     return { repos };
   },
 
@@ -46,7 +48,7 @@ export const api = {
     const data = await mcp<{
       repositories: { name: string; full_name: string; branches?: string[] }[];
     }>("repo_reader", {});
-    const item = (data?.repositories ?? []).find((r) => r.full_name === repo);
+    const item = (data?.data?.repositories ?? []).find((r) => r.full_name === repo);
     return { branches: item?.branches ?? [] };
   },
 
@@ -139,35 +141,82 @@ export const api = {
     return { results };
   },
 
-  // --- Mock deploy APIs for Dashboard ---
-  async startDeploy({ repo, env }: { repo: string; env: string }) {
-    const jobId = `job_${Math.random().toString(36).slice(2)}`;
-    // Stash minimal job info in memory for the stream to reference
-    JOBS.set(jobId, { repo, env, startedAt: Date.now() });
-    return { jobId } as const;
-  },
+  // --- Deploy APIs for Dashboard ---
+async startDeploy({
+  repoFullName: fromCallerRepo,
+  branch,
+  env,
+  yaml: fromCallerYaml,
+  provider,
+  path,
+}: {
+  repoFullName?: string;
+  branch?: string;
+  env?: string;
+  yaml?: string;
+  provider?: string;
+  path?: string;
+}) {
+  const pipelineStore = usePipelineStore.getState();
+  const repoFullName = fromCallerRepo || pipelineStore?.repoFullName || pipelineStore?.result?.repo;
+  const selectedBranch = branch || pipelineStore?.selectedBranch || "main";
+  const yaml = pipelineStore?.result?.generated_yaml;
+  const environment = env || pipelineStore?.environment || "dev";
 
-  streamJob(
-    jobId: string,
-    onEvent: (e: { ts: string; level: "info" | "warn" | "error"; msg: string }) => void
-  ) {
-    const meta = JOBS.get(jobId) || { repo: "?", env: "dev" };
+  const providerFinal = provider || pipelineStore?.provider || "aws";
+  const pathFinal = path || `.github/workflows/${environment}-deploy.yml`;
+
+  console.group("[Deploy Debug]");
+  console.log("repoFullName:", repoFullName);
+  console.log("selectedBranch:", selectedBranch);
+  console.log("environment:", environment);
+  console.log("provider:", providerFinal);
+  console.log("path:", pathFinal);
+  console.log("YAML length:", yaml ? yaml.length : 0);
+  console.groupEnd();
+
+  const payload = {
+    repoFullName,
+    branch: selectedBranch,
+    env: environment,
+    yaml,
+    provider: providerFinal,
+    path: pathFinal,
+  };
+
+  console.log("[Deploy] Final payload:", payload);
+
+  const res = await fetch(`${SERVER_BASE}/mcp/v1/pipeline_commit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(payload),
+  });
+
+  const data = await res.json().catch(() => ({}));
+
+  console.group("[Deploy Response]");
+  console.log("Status:", res.status);
+  console.log("Data:", data);
+  console.groupEnd();
+
+  if (!res.ok) throw new Error(`Pipeline commit failed: ${res.statusText}`);
+  return data;
+},
+
+  streamJob(_jobId: string, onEvent: (e: { ts: string; level: "info"; msg: string }) => void) {
     const steps = [
-      `Authenticating to AWS (${meta.env})`,
-      `Assuming role`,
-      `Validating permissions`,
-      `Building artifacts`,
-      `Deploying ${meta.repo}`,
-      `Verifying rollout`,
-      `Done`
+      "Connecting to GitHub...",
+      "Committing workflow file...",
+      "Verifying commit...",
+      "Done ✅"
     ];
     let i = 0;
     const timer = setInterval(() => {
       if (i >= steps.length) return;
-      const level = i === steps.length - 1 ? "info" : "info";
-      onEvent({ ts: new Date().toISOString(), level, msg: steps[i++] });
+      onEvent({ ts: new Date().toISOString(), level: "info", msg: steps[i++] });
       if (i >= steps.length) clearInterval(timer);
-    }, 800);
+    }, 600);
     return () => clearInterval(timer);
   },
 

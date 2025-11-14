@@ -9,6 +9,7 @@ export const MCP_TOOLS = {
   repo_reader: repo_reader,
   pipeline_generator: pipeline_generator,
   oidc: oidc_adapter,
+  oidc_adapter: oidc_adapter,
   github: github_adapter,
   github_adapter: github_adapter,
 };
