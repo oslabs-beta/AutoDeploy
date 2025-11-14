@@ -75,7 +75,7 @@ const UserBody = z.object({
 
 // Create or upsert user by email
 app.post('/users', async (req, res) => {
-  const parse = UserBody.safeParse(req.body); // love that you are doing this. great.
+  const parse = UserBody.safeParse(req.body);
   if (!parse.success)
     return res.status(400).json({ error: parse.error.message });
   const { email, github_username } = parse.data;

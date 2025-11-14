@@ -19,6 +19,10 @@ const {
   JWT_SECRET,
 } = process.env;
 
+// URL to redirect user to the apropiate endpoint after GitHub authentication success
+const FRONTEND_URL =
+  process.env.FRONTEND_URL || 'http://localhost:5173/connect';
+
 if (!GITHUB_CLIENT_ID || !GITHUB_CLIENT_SECRET || !GITHUB_OAUTH_REDIRECT_URI) {
   console.warn('[WARN] Missing GitHub OAuth env vars');
 }
@@ -158,7 +162,7 @@ router.get('/callback', async (req, res) => {
       // secure: true, // enable on HTTPS
     });
 
-    return res.redirect('/');
+    return res.redirect(FRONTEND_URL);
   } catch (e) {
     console.error('[OAuth callback] error:', e);
     return res.status(500).send(`OAuth failed: ${e.message}`);
