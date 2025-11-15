@@ -19,6 +19,16 @@ const buttonVariants = cva(
           "bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",
         link: "text-primary underline-offset-4 hover:underline",
+
+        // ✅ Glass (matches Connect page look)
+        glass:
+          "border border-white/30 bg-white/10 text-slate-100 " +
+          "hover:bg-white/20 backdrop-blur-md shadow-glass",
+
+        // optional: a slightly stronger white version for primary actions
+        glassSolid:
+          "border border-white/40 bg-white/20 text-slate-900 " +
+          "hover:bg-white/30 backdrop-blur-md shadow-glass",
       },
       size: {
         default: "h-9 px-4 py-2",
