@@ -2,9 +2,12 @@ name: CI & Docker
 
 on:
   push:
-    branches: [main, lorenc-ci]
+    branches:
+      - main
+      - lorenc-ci
   pull_request:
-    branches: [main]
+    branches:
+      - main
 
 jobs:
   build-test:
