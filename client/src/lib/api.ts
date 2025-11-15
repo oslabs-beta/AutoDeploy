@@ -129,6 +129,7 @@ export const api = {
     const hasAws = !!role;
     const region = aws?.region || connections.awsOidc.region || "us-east-1";
     const s = Object.fromEntries(secrets.map((x) => [x.key, x.present] as const));
+    
 
     const results = [
       { label: "GitHub App installed", ok: hasGithubApp },
