@@ -149,3 +149,6 @@ coverage/
 
 # SSH key for AWS
 jenkins.pem
+
+# Local change log (Chinese summary)
+change_log_cn.md

@@ -1,0 +1,68 @@
+name: CI & Docker
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-test:
+    runs-on: unbuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          cd server
+          npm ci
+
+      - name: Run tests
+        run: |
+          cd server
+          npm test --if-present
+
+  docker-image:
+    needs: build-test
+    runs-on: unbuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    env:
+      IMAGE_NAME: mcp-backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Docker image
+        run: |
+          IMAGE_ID=ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          VERSION=${{ github.sha }}
+
+          echo "IMAGE_ID=$IMAGE_ID" >> $GITHUB_ENV
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+          docker build -t $IMAGE_ID:$VERSION -t $IMAGE_ID:latest .
+
+      - name: Push Docker image
+        run: |
+          docker push $IMAGE_ID:$VERSION
+          docker push $IMAGE_ID:latest

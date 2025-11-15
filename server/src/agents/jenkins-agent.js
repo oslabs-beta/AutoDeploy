@@ -1,25 +1,25 @@
-import path from "node:path";
 import { Agent, run, MCPServerStreamableHttp } from "@openai/agents";
 
+const DEFAULT_JENKINS_MCP_URL = "http://192.168.1.35:8090/mcp-server/mcp";
 
-export async function askJenkins(question) {
+export async function askJenkins(question, options = {}) {
   const user = process.env.JENKINS_USER;
-  const token = process.env.JENKINS_TOKEN;
-  // construct Basic Auth
-  const authToken = Buffer.from(
-    `${process.env.JENKINS_USER}:${process.env.JENKINS_TOKEN}`
-  ).toString("base64");
+  const token = options.token || process.env.JENKINS_TOKEN;
+  const mcpUrl = options.mcpUrl || process.env.JENKINS_MCP_URL || DEFAULT_JENKINS_MCP_URL;
 
-  if (!user || !token) {
-    throw new Error("JENKINS_USER or JENKINS_TOKEN is not set in the environment");
+  if (!user) {
+    throw new Error("JENKINS_USER is not set in the environment");
   }
 
-  // 1. URL change /mcp-server/mcp
-  // 2. use requestInit.headers pass Authorization
-  console.log(authToken);
+  if (!token) {
+    throw new Error("JENKINS_TOKEN is required. Provide it in the request body or environment");
+  }
+
+  const authToken = Buffer.from(`${user}:${token}`).toString("base64");
+
   const jenkinsMcp = new MCPServerStreamableHttp({
     name: "jenkins-mcp",
-    url: "https://jenkins.ilessai.com/mcp-server/mcp",
+    url: mcpUrl,
     requestInit: {
       headers: {
         Authorization: `Basic ${authToken}`,
@@ -27,12 +27,8 @@ export async function askJenkins(question) {
     },
   });
 
-
-  await jenkinsMcp.connect();
-
-
   try {
-    console.log("[askJenkins] connecting to Jenkins MCP…");
+    console.log(`[askJenkins] connecting to Jenkins MCP at ${mcpUrl}…`);
     await jenkinsMcp.connect();
     console.log("[askJenkins] connected. Listing tools…");
 
