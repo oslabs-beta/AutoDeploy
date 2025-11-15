@@ -1,4 +1,4 @@
-// src/pages/ConnectPage.tsx
+import { GlassButton } from "../components/ui/GlassButton";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -11,16 +11,16 @@ export default function ConnectPage() {
 
   return (
     <div className="max-w-3xl mx-auto p-6 mt-10">
-      <div className="rounded-2xl border border-white/20 bg-white/10 backdrop-blur-md shadow-2xl p-6">
+      <div className="rounded-2xl border border-white/20 bg-white/10 backdrop-blur-md shadow-glass p-6">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-xl font-semibold text-white/90">Connect your repository</h1>
-          <Button
+          <GlassButton
             variant="secondary"
             className="bg-white/20 hover:bg-white/30 text-white"
             onClick={loadRepos}
           >
             Re-sync Repos
-          </Button>
+          </GlassButton>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
@@ -61,13 +61,13 @@ export default function ConnectPage() {
         </div>
 
         <div className="mt-8">
-          <Button
+          <GlassButton
             className="bg-white/20 hover:bg-white/30 text-white"
             disabled={!repo || !branch}
             onClick={() => location.assign("/configure")}
           >
             Continue → Configure
-          </Button>
+          </GlassButton>
         </div>
       </div>
     </div>
