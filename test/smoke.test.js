@@ -1,6 +1,6 @@
 import fetch from 'node-fetch';
 
-const port = process.env.PORT || 4000;
+const port = process.env.PORT || 3000;
 const url = `http://localhost:${port}/health`;
 
 async function main() {
