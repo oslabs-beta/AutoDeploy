@@ -41,6 +41,7 @@ import { z } from 'zod';
 import { query } from './db.js';
 import jenkinsRouter from './routes/jenkins.js';
 import pipelineCommitRouter from './routes/pipelineCommit.js';
+import pipelineSessionsRouter from './routes/pipelineSessions.js';
 // app.use(authRoutes);
 
 const app = express();
@@ -185,6 +186,8 @@ app.use('/auth/aws', authAws);
 app.use('/auth/google', authGoogle);
 
 app.use('/jenkins', jenkinsRouter);
+
+app.use('/pipeline-sessions', pipelineSessionsRouter);
 
 // --- Global Error Handler ---
 app.use((err, req, res, next) => {
