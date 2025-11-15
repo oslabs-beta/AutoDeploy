@@ -2,13 +2,13 @@ name: CI & Docker
 
 on:
   push:
-    branches: [main]
+    branches: [main, lorenc-ci]
   pull_request:
     branches: [main]
 
 jobs:
   build-test:
-    runs-on: unbuntu-latest
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -32,7 +32,7 @@ jobs:
 
   docker-image:
     needs: build-test
-    runs-on: unbuntu-latest
+    runs-on: ubuntu-latest
 
     permissions:
       contents: read
