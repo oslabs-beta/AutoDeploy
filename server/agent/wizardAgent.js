@@ -1,25 +1,39 @@
-import OpenAI from "openai";
-import dotenv from "dotenv";
-import fetch from "node-fetch";
+import OpenAI from 'openai';
+import dotenv from 'dotenv';
+import fetch from 'node-fetch';
 
 dotenv.config();
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+//const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// Construct the OpenAI client lazily so that the server does not shut down completely when we build the container
+let client = null;
+
+function getClient() {
+  if (!client) {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error('Missing OPENAI_API_KEY - cannot run Wizard Agent');
+    }
+    client = new OpenAI({ apiKey });
+  }
+  return client;
+}
 
 // Helper: call MCP routes dynamically, with error handling
 async function callMCPTool(tool, input) {
   try {
     const response = await fetch(`http://localhost:3000/mcp/v1/${tool}`, {
-      method: "POST",
+      method: 'POST',
       headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.MCP_SESSION_TOKEN}`,
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.MCP_SESSION_TOKEN}`,
       },
       body: JSON.stringify(input),
     });
     return await response.json();
   } catch (err) {
-    console.warn("⚠️ MCP call failed:", err.message || err);
-    return { error: "MCP server unreachable" };
+    console.warn('⚠️ MCP call failed:', err.message || err);
+    return { error: 'MCP server unreachable' };
   }
 }
 
@@ -45,16 +59,18 @@ export async function runWizardAgent(userPrompt) {
   - “List repos”, “List repositories”, or “repositories” → use \`repo_reader\` with optional \`{ username: "...", user_id: "..." }\`
   `;
 
+  const client = getClient();
+
   const completion = await client.chat.completions.create({
-    model: "gpt-4o-mini",
+    model: 'gpt-4o-mini',
     messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
     ],
   });
 
   const decision = completion.choices[0].message.content;
-  console.log("\n🤖 Agent decided:", decision);
+  console.log('\n🤖 Agent decided:', decision);
 
   // Tool mapping using regex patterns
   const toolMap = {
@@ -70,47 +86,67 @@ export async function runWizardAgent(userPrompt) {
 
       // --- Extract context dynamically from userPrompt or decision ---
       // Prefer explicit labels like: "repo owner/name", "template node_app", "provider aws"
-      const labeledRepo = userPrompt.match(/\brepo\s+([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/i) 
-                       || decision.match(/\brepo\s+([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/i);
-      const genericRepo = (userPrompt + " " + decision).match(/\b(?!ci\/cd\b)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/);
-      const repo = (labeledRepo?.[1] || genericRepo?.[1] || null);
+      const labeledRepo =
+        userPrompt.match(/\brepo\s+([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/i) ||
+        decision.match(/\brepo\s+([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/i);
+      const genericRepo = (userPrompt + ' ' + decision).match(
+        /\b(?!ci\/cd\b)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/
+      );
+      const repo = labeledRepo?.[1] || genericRepo?.[1] || null;
 
-      const labeledProvider = userPrompt.match(/\bprovider\s+(aws|jenkins|gcp|azure)\b/i) 
-                           || decision.match(/\bprovider\s+(aws|jenkins|gcp|azure)\b/i);
-      const genericProvider = userPrompt.match(/\b(aws|jenkins|github actions|gcp|azure)\b/i) 
-                           || decision.match(/\b(aws|jenkins|github actions|gcp|azure)\b/i);
-      const provider = (labeledProvider?.[1] || genericProvider?.[1] || null)?.toLowerCase().replace(/\s+/g, ' ');
+      const labeledProvider =
+        userPrompt.match(/\bprovider\s+(aws|jenkins|gcp|azure)\b/i) ||
+        decision.match(/\bprovider\s+(aws|jenkins|gcp|azure)\b/i);
+      const genericProvider =
+        userPrompt.match(/\b(aws|jenkins|github actions|gcp|azure)\b/i) ||
+        decision.match(/\b(aws|jenkins|github actions|gcp|azure)\b/i);
+      const provider = (labeledProvider?.[1] || genericProvider?.[1] || null)
+        ?.toLowerCase()
+        .replace(/\s+/g, ' ');
 
-      const labeledTemplate = userPrompt.match(/\btemplate\s+([a-z_][a-z0-9_]+)\b/i) 
-                           || decision.match(/\btemplate\s+([a-z_][a-z0-9_]+)\b/i);
-      const genericTemplate = userPrompt.match(/\b(node_app|python_app|container_service|node|python|react|express|django|flask|java|go)\b/i) 
-                           || decision.match(/\b(node_app|python_app|container_service|node|python|react|express|django|flask|java|go)\b/i);
-      const template = (labeledTemplate?.[1] || genericTemplate?.[1] || null)?.toLowerCase();
+      const labeledTemplate =
+        userPrompt.match(/\btemplate\s+([a-z_][a-z0-9_]+)\b/i) ||
+        decision.match(/\btemplate\s+([a-z_][a-z0-9_]+)\b/i);
+      const genericTemplate =
+        userPrompt.match(
+          /\b(node_app|python_app|container_service|node|python|react|express|django|flask|java|go)\b/i
+        ) ||
+        decision.match(
+          /\b(node_app|python_app|container_service|node|python|react|express|django|flask|java|go)\b/i
+        );
+      const template = (
+        labeledTemplate?.[1] ||
+        genericTemplate?.[1] ||
+        null
+      )?.toLowerCase();
 
-      if (toolName === "repo_reader") {
+      if (toolName === 'repo_reader') {
         // Extract optional username, user_id, and repo info
         const usernameMatch = userPrompt.match(/\busername[:=]?\s*([\w-]+)\b/i);
-        const userIdMatch = userPrompt.match(/\buser[_ ]?id[:=]?\s*([\w-]+)\b/i);
+        const userIdMatch = userPrompt.match(
+          /\buser[_ ]?id[:=]?\s*([\w-]+)\b/i
+        );
         const repoMatch = userPrompt.match(/\b([\w-]+\/[\w-]+)\b/);
 
         const payload = {};
         if (usernameMatch) payload.username = usernameMatch[1];
         if (userIdMatch) payload.user_id = userIdMatch[1];
         if (repoMatch) {
-          const [username, repo] = repoMatch[1].split("/");
+          const [username, repo] = repoMatch[1].split('/');
           payload.username = username;
           payload.repo = `${username}/${repo}`;
         }
 
-        return await callMCPTool("repo_reader", payload);
+        return await callMCPTool('repo_reader', payload);
       }
 
-      if (toolName === "pipeline_generator") {
+      if (toolName === 'pipeline_generator') {
         if (!repo) {
-          console.warn("⚠️ Missing repo context for pipeline generation.");
-          return { 
-            success: false, 
-            error: "I couldn’t determine which repository you meant. Please specify it, e.g., 'generate pipeline for user/repo'." 
+          console.warn('⚠️ Missing repo context for pipeline generation.');
+          return {
+            success: false,
+            error:
+              "I couldn’t determine which repository you meant. Please specify it, e.g., 'generate pipeline for user/repo'.",
           };
         }
 
@@ -121,35 +157,51 @@ export async function runWizardAgent(userPrompt) {
         // Fetch GitHub repo details before pipeline generation
         let repoInfo = null;
         try {
-          const info = await callMCPTool("github_adapter", { action: "info", repo });
+          const info = await callMCPTool('github_adapter', {
+            action: 'info',
+            repo,
+          });
           if (info?.data?.success) {
             repoInfo = info.data;
             console.log(`📦 Retrieved repo info from GitHub:`, repoInfo);
           }
         } catch (err) {
-          console.warn("⚠️ Failed to fetch GitHub info before pipeline generation:", err.message);
+          console.warn(
+            '⚠️ Failed to fetch GitHub info before pipeline generation:',
+            err.message
+          );
         }
 
         // Merge language or visibility into payload if available
-        if (repoInfo?.language && !payload.language) payload.language = repoInfo.language.toLowerCase();
-        if (repoInfo?.visibility && !payload.visibility) payload.visibility = repoInfo.visibility;
+        if (repoInfo?.language && !payload.language)
+          payload.language = repoInfo.language.toLowerCase();
+        if (repoInfo?.visibility && !payload.visibility)
+          payload.visibility = repoInfo.visibility;
 
         // Infer template if still missing
         if (!payload.template) {
-          if (repoInfo?.language?.toLowerCase().includes("javascript") || repoInfo?.language?.toLowerCase().includes("typescript") || /js|ts|node|javascript/i.test(repo)) {
-            payload.template = "node_app";
-          } else if (repoInfo?.language?.toLowerCase().includes("python") || /py|flask|django/i.test(repo)) {
-            payload.template = "python_app";
+          if (
+            repoInfo?.language?.toLowerCase().includes('javascript') ||
+            repoInfo?.language?.toLowerCase().includes('typescript') ||
+            /js|ts|node|javascript/i.test(repo)
+          ) {
+            payload.template = 'node_app';
+          } else if (
+            repoInfo?.language?.toLowerCase().includes('python') ||
+            /py|flask|django/i.test(repo)
+          ) {
+            payload.template = 'python_app';
           } else {
-            payload.template = "container_service";
+            payload.template = 'container_service';
           }
           console.log(`🪄 Inferred template: ${payload.template}`);
         }
 
         // --- Auto-correct short template names ---
-        if (payload.template === "node") payload.template = "node_app";
-        if (payload.template === "python") payload.template = "python_app";
-        if (payload.template === "container") payload.template = "container_service";
+        if (payload.template === 'node') payload.template = 'node_app';
+        if (payload.template === 'python') payload.template = 'python_app';
+        if (payload.template === 'container')
+          payload.template = 'container_service';
 
         // --- Preserve repo context globally ---
         if (!payload.repo && globalThis.LAST_REPO_USED) {
@@ -159,44 +211,52 @@ export async function runWizardAgent(userPrompt) {
         }
 
         // ✅ Ensure provider is valid before sending payload
-        if (!payload.provider || !["aws", "jenkins"].includes(payload.provider)) {
+        if (
+          !payload.provider ||
+          !['aws', 'jenkins'].includes(payload.provider)
+        ) {
           // Infer from repo visibility or fallback to AWS
-          payload.provider = repoInfo?.visibility === "private" ? "jenkins" : "aws";
+          payload.provider =
+            repoInfo?.visibility === 'private' ? 'jenkins' : 'aws';
           console.log(`🧭 Inferred provider: ${payload.provider}`);
         }
 
-        console.log("🧩 Final payload to pipeline_generator:", payload);
-        return await callMCPTool("pipeline_generator", payload);
+        console.log('🧩 Final payload to pipeline_generator:', payload);
+        return await callMCPTool('pipeline_generator', payload);
       }
 
-      if (toolName === "oidc_adapter") {
+      if (toolName === 'oidc_adapter') {
         const payload = provider ? { provider } : {};
-        return await callMCPTool("oidc_adapter", payload);
+        return await callMCPTool('oidc_adapter', payload);
       }
 
-      if (toolName === "github_adapter") {
+      if (toolName === 'github_adapter') {
         if (repo) {
-          return await callMCPTool("github/info", { repo });
+          return await callMCPTool('github/info', { repo });
         } else {
-          console.warn("⚠️ Missing repo for GitHub info retrieval.");
-          return { 
-            success: false, 
-            error: "Couldn’t determine which repository to fetch. Please include it in your request (e.g., 'tell me about user/repo')." 
+          console.warn('⚠️ Missing repo for GitHub info retrieval.');
+          return {
+            success: false,
+            error:
+              "Couldn’t determine which repository to fetch. Please include it in your request (e.g., 'tell me about user/repo').",
           };
         }
       }
     }
   }
 
-  return { message: "No matching tool found. Try asking about a repo, pipeline, or AWS role." };
+  return {
+    message:
+      'No matching tool found. Try asking about a repo, pipeline, or AWS role.',
+  };
 }
 
 // Example local test (can comment out for production)
 if (process.argv[2]) {
-  const input = process.argv.slice(2).join(" ");
+  const input = process.argv.slice(2).join(' ');
   runWizardAgent(input)
     .then((res) => {
-      console.log("\n📦 Tool Output:\n", JSON.stringify(res, null, 2));
+      console.log('\n📦 Tool Output:\n', JSON.stringify(res, null, 2));
     })
     .catch(console.error);
 }
