@@ -3,9 +3,16 @@ import { askJenkins } from '../src/agents/jenkins-agent.js';
 
 const router = express.Router();
 
-router.post('/ask', async (req, res) => {
+router.get("/config", (req, res) => {
+  res.json({
+    mcpUrlHint: process.env.JENKINS_MCP_URL || "http://192.168.1.35/mcp-server/mcp",
+    tokenHint: process.env.JENKINS_TOKEN || "",
+  });
+});
+
+router.post("/ask", async (req, res) => {
   try {
-    const { question } = req.body;
+    const { question, mcpUrl, token } = req.body;
     if (!question) {
       return res
         .status(400)
@@ -13,7 +20,7 @@ router.post('/ask', async (req, res) => {
     }
 
     console.log(`[JENKINS ASK] ${question}`);
-    const answer = await askJenkins(question);
+    const answer = await askJenkins(question, { mcpUrl, token });
 
     res.json({
       question,
