@@ -17,6 +17,8 @@ import deploymentsRouter from './routes/deployments.js';
 import authRouter from './routes/authRoutes.js';
 import userRouter from './routes/usersRoutes.js';
 import pipelineCommitRouter from './routes/pipelineCommit.js';
+import pipelineSessionsRouter from './routes/pipelineSessions.js';
+// app.use(authRoutes);
 import jenkinsRouter from './routes/jenkins.js';
 
 // helper functions / constants / other data
@@ -66,6 +68,7 @@ app.use(authRouter);
 app.use('/auth/aws', authAws);
 app.use('/auth/google', authGoogle);
 app.use('/jenkins', jenkinsRouter);
+app.use('/pipeline-sessions', pipelineSessionsRouter);
 
 /** Users */
 const UserBody = z.object({
@@ -128,6 +131,20 @@ app.get('/connections', async (_req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
+// -- Agent entry point
+
+/*
+you should keep your router names consistent:
+  - deploymentsRouter
+  - agentRouter (not agentRoutes)
+  - authAwsRouter (not authAws)
+  - authGoogleRouter (not authGoogle)
+  etc.
+*/
+
+// also, i'd probably move these routes closer to the top of the file, so they're easier to find.
+
 
 // --- Global Error Handler ---
 app.use((err, _req, res, _next) => {

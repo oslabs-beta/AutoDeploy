@@ -55,9 +55,8 @@ export const repo_reader = {
           url = `https://api.github.com/repos/${repo}`;
         }
       } else {
-        url = username
-          ? `https://api.github.com/users/${username}/repos`
-          : "https://api.github.com/user/repos";
+        // Always use authenticated GitHub endpoint to ensure private repos are included
+        url = "https://api.github.com/user/repos";
       }
 
       const response = await fetch(url, {
@@ -90,6 +89,64 @@ export const repo_reader = {
         if (!Array.isArray(data)) {
           console.error("Unexpected GitHub API response format for repo list:", data);
           return { success: false, data: null, error: "Unexpected GitHub API response format" };
+        }
+
+        // 🔥 NEW: Persist repositories into github_repos (UPSERT)
+        try {
+          for (const r of data) {
+            const { full_name, name, owner, default_branch, language, private: isPrivate, html_url } = r;
+
+            await query(
+              `
+              INSERT INTO github_repos (
+                user_id,
+                full_name,
+                owner,
+                name,
+                default_branch,
+                visibility,
+                language,
+                description,
+                html_url,
+                fork,
+                archived,
+                repo_metadata
+              )
+              VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+              )
+              ON CONFLICT (full_name, user_id)
+              DO UPDATE SET
+                default_branch = EXCLUDED.default_branch,
+                visibility = EXCLUDED.visibility,
+                language = EXCLUDED.language,
+                description = EXCLUDED.description,
+                html_url = EXCLUDED.html_url,
+                fork = EXCLUDED.fork,
+                archived = EXCLUDED.archived,
+                repo_metadata = EXCLUDED.repo_metadata,
+                updated_at = NOW()
+              `,
+              [
+                user_id,
+                full_name,
+                r.owner?.login || "",
+                name,
+                default_branch,
+                isPrivate ? "private" : "public",
+                language,
+                r.description || "",
+                html_url,
+                r.fork,
+                r.archived,
+                JSON.stringify({
+                  branches: r.branches || [],
+                }),
+              ]
+            );
+          }
+        } catch (dbErr) {
+          console.error("Failed to upsert into github_repos:", dbErr);
         }
 
         for (const r of data) {

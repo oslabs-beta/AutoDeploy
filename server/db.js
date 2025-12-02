@@ -9,11 +9,6 @@ const { Pool } = pkg;
 // - Limits max concurrent connections so we don’t overload the DB.
 // - Handles idle timeouts & connection timeouts for us.
 
-console.log(
-  '🔐 DB SSL rejectUnauthorized:',
-  process.env.DB_SSL_REJECT_UNAUTHORIZED
-);
-
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: parseInt(process.env.DB_POOL_MAX || '8', 10),
@@ -22,8 +17,7 @@ export const pool = new Pool({
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,
   ssl: {
-    require: true,
-    rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false',
+    rejectUnauthorized: false,
   },
 });
 
