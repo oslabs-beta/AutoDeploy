@@ -34,25 +34,25 @@ async function mcp<T>(tool: string, input: Record<string, any> = {}): Promise<T>
 }
 
 export const api = {
-  // Pull repos via MCP repo_reader tool (mocked backend). Maps to simple string[] of full_name.
+  // ✅ method syntax (preferred)
   async listRepos(): Promise<{ repos: string[] }> {
-    const data = await mcp<{
-      repositories: { name: string; full_name: string; branches?: string[] }[];
-    }>("repo_reader", {});
-    const repos = (data?.data?.repositories ?? []).map((r) => r.full_name);
+    const data = await mcp<{ repositories: { full_name: string; branches?: string[] }[] }>(
+      "repo_reader",
+      {}
+    );
+    const repos = (data.repositories ?? []).map(r => r.full_name);
     return { repos };
   },
 
-  // Derive branches by calling repo_reader again and selecting the repo.
   async listBranches(repo: string): Promise<{ branches: string[] }> {
-    const data = await mcp<{
-      repositories: { name: string; full_name: string; branches?: string[] }[];
-    }>("repo_reader", {});
-    const item = (data?.data?.repositories ?? []).find((r) => r.full_name === repo);
+    const data = await mcp<{ repositories: { full_name: string; branches?: string[] }[] }>(
+      "repo_reader",
+      {}
+    );
+    const item = (data.repositories ?? []).find(r => r.full_name === repo);
     return { branches: item?.branches ?? [] };
   },
 
-  // Generate pipeline via MCP pipeline_generator (mock). Assume provider 'aws' for now.
   async createPipeline(payload: any) {
     const { repo, branch, template = "node_app", options } = payload || {};
     const data = await mcp("pipeline_generator", {
@@ -65,20 +65,21 @@ export const api = {
     return data;
   },
 
-  // List AWS roles via MCP oidc_adapter and map to list of ARNs.
   async listAwsRoles(): Promise<{ roles: string[] }> {
     const data = await mcp<{ roles?: { name: string; arn: string }[] }>(
       "oidc_adapter",
       { provider: "aws" }
     );
-    const roles = (data.roles ?? []).map((r) => r.arn);
-    return { roles };
+    return { roles: (data.roles ?? []).map(r => r.arn) };
   },
 
-  // Not implemented on server yet; keep API shape but throw a helpful error.
   async openPr(_payload: any) {
     throw new Error("openPr is not implemented on the server (no MCP tool)");
   },
+
+  // ... keep the rest of your existing methods like getConnections, getSecretPresence, etc.
+
+
 
   // --- Mocked config/secrets endpoints for Secrets/Preflight flow ---
   async getConnections(_repo: string): Promise<{
@@ -129,6 +130,7 @@ export const api = {
     const hasAws = !!role;
     const region = aws?.region || connections.awsOidc.region || "us-east-1";
     const s = Object.fromEntries(secrets.map((x) => [x.key, x.present] as const));
+    
 
     const results = [
       { label: "GitHub App installed", ok: hasGithubApp },

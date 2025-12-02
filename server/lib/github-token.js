@@ -1,5 +1,6 @@
 import { query } from '../db.js';
 
+// Get the GitHub access token for the user
 export async function getGithubAccessTokenForUser(userId) {
   if (process.env.GITHUB_PAT_OVERRIDE) {
     return process.env.GITHUB_PAT_OVERRIDE;

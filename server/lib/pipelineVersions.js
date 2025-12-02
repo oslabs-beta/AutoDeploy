@@ -1,6 +1,8 @@
+// Helper for storing versioned copies of workflow YAML files
 import crypto from 'crypto';
 import { query } from '../db.js';
 
+// Save a new pipeline YAML version with a SHA-256 hash for change tracking
 export async function savePipelineVersion({
   userId,
   repoFullName,

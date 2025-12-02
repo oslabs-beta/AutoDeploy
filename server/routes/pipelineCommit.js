@@ -7,8 +7,6 @@ import { savePipelineVersion } from '../lib/pipelineVersions.js';
 
 const router = Router();
 
-// this is nice. consider using JSDoc at some point in the future to document your routes/functions/etc.
-// it really elevates a codebase's professionalism
 /**
  * POST /mcp/v1/pipeline_commit
  * Body:
@@ -19,6 +17,8 @@ const router = Router();
  *   "path": ".github/workflows/ci.yml"
  * }
  */
+
+// Commit a workflow YAML file to GitHub and record a new pipeline version
 router.post('/pipeline_commit', requireSession, async (req, res) => {
   try {
     const { repoFullName, branch, yaml, path } = req.body || {};
@@ -63,13 +63,13 @@ router.post('/pipeline_commit', requireSession, async (req, res) => {
         'success', NOW(), $7, $8::jsonb);
         `,
       [
-        userId, // user_id
-        'github_actions', // provider (or 'pipeline' if you prefer)
-        repoFullName, // repo_full_name
-        'global', // environment
-        branchName, // branch
-        'pipeline_commit', // action
-        `Committed workflow ${workflowPath} via OSP`, // summary
+        userId,
+        'github_actions',
+        repoFullName,
+        'global',
+        branchName,
+        'pipeline_commit',
+        `Committed workflow ${workflowPath} via OSP`,
         JSON.stringify({
           workflow_path: workflowPath,
           branch: branchName,
@@ -116,6 +116,7 @@ router.post('/pipeline_commit', requireSession, async (req, res) => {
  *   GET /mcp/v1/pipeline_history?repoFullName=lorencDedaj/NeatNest&branch=main
  */
 
+// List stored YAML versions for a give repo/branch/path
 router.get('/pipeline_history', requireSession, async (req, res) => {
   try {
     const { repoFullName, branch, path, limit } = req.query || {};
@@ -182,6 +183,7 @@ router.get('/pipeline_history', requireSession, async (req, res) => {
  *   - saving a new pipeline_versions entry with source='pipeline_rollback'
  */
 
+// Roll back to a previoys pipeline YAML version and log it as a deployment
 router.post('/pipeline_rollback', requireSession, async (req, res) => {
   try {
     const { versionId } = req.body || {};
@@ -309,12 +311,10 @@ router.post('/pipeline_rollback', requireSession, async (req, res) => {
   } catch (err) {
     console.error('[pipeline_rollback] error:', err);
     const status = err.status || 500;
-    return res
-      .status(status)
-      .json({
-        error: err.message || 'Failed to rollback pipeline',
-        details: err.details || undefined,
-      });
+    return res.status(status).json({
+      error: err.message || 'Failed to rollback pipeline',
+      details: err.details || undefined,
+    });
   }
 });
 

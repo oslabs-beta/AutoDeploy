@@ -1,48 +1,29 @@
-/*
-  i'd recommend organizing your imports at the top of files (here and in other files),
-  perhaps by sections separated with spaces, i.e.:
-
-  // library dependencies
-  import express from 'express'
-  import cors from 'cors'
-  import helmet from 'helmet'
-  import { z } from 'zod'
-  ...
-
-  // routes
-  import mcpRoutes from './routes/mcp.js'
-  import agentRoutes from './routes/agent.js'
-  ...
-
-  // helper functions / constants / other data / etc.
-  import { healthCheck } from './db.js'
-  import { query } from './db.js'
-  ...
-
-  all up to you how you want to do this. but i find it helps with readability and organization.
-*/
-
-import 'dotenv/config';
+// library dependencies
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import { z } from 'zod';
+import 'dotenv/config';
 import morgan from 'morgan';
-import { healthCheck } from './db.js';
-import mcpRoutes from './routes/mcp.js';
-import agentRoutes from './routes/agent.js';
-import githubAuthRouter from './routes/auth.github.js';
-import deploymentsRouter from './routes/deployments.js';
-import authRoutes from './routes/authRoutes.js';
-import userRouter from './routes/usersRoutes.js';
 import cookieParser from 'cookie-parser';
+
+// routes
 import authAws from './routes/auth.aws.js';
 import authGoogle from './routes/auth.google.js';
-import { z } from 'zod';
-import { query } from './db.js';
-import jenkinsRouter from './routes/jenkins.js';
+import mcpRouter from './routes/mcp.js';
+import agentRouter from './routes/agent.js';
+import githubAuthRouter from './routes/auth.github.js';
+import deploymentsRouter from './routes/deployments.js';
+import authRouter from './routes/authRoutes.js';
+import userRouter from './routes/usersRoutes.js';
 import pipelineCommitRouter from './routes/pipelineCommit.js';
 import pipelineSessionsRouter from './routes/pipelineSessions.js';
 // app.use(authRoutes);
+import jenkinsRouter from './routes/jenkins.js';
+
+// helper functions / constants / other data
+import { healthCheck } from './db.js';
+import { query } from './db.js';
 
 const app = express();
 app.use(express.json());
@@ -52,8 +33,6 @@ app.use(morgan('dev'));
 app.use(cookieParser());
 
 // --- Request Logging Middleware ---
-
-// a convention you can choose to follow is prefixing unused parameters with an underscore
 app.use((req, _res, next) => {
   const user = req.headers['x-user-id'] || 'anonymous';
   console.log(
@@ -61,8 +40,6 @@ app.use((req, _res, next) => {
       req.originalUrl
     } | user=${user}`
   );
-  // ^ nice logging; this is great.
-
   next();
 });
 
@@ -70,6 +47,7 @@ app.use((req, _res, next) => {
 app.get('/health', (_req, res) =>
   res.json({ ok: true, uptime: process.uptime() })
 );
+
 app.get('/db/ping', async (_req, res) => {
   try {
     const ok = await healthCheck();
@@ -79,11 +57,18 @@ app.get('/db/ping', async (_req, res) => {
   }
 });
 
-// Mount users route at /users
-// ^ imo, this kind of comment is a bit useless: it's obvious to other devs what it does :)
+// Routes
 app.use('/', userRouter);
-
-// i'd probably put the other routes here as well.
+app.use('/deployments', deploymentsRouter);
+app.use('/agent', agentRouter);
+app.use('/mcp/v1', pipelineCommitRouter);
+app.use('/mcp/v1', mcpRouter);
+app.use('/auth/github', githubAuthRouter);
+app.use(authRouter);
+app.use('/auth/aws', authAws);
+app.use('/auth/google', authGoogle);
+app.use('/jenkins', jenkinsRouter);
+app.use('/pipeline-sessions', pipelineSessionsRouter);
 
 /** Users */
 const UserBody = z.object({
@@ -93,7 +78,7 @@ const UserBody = z.object({
 
 // Create or upsert user by email
 app.post('/users', async (req, res) => {
-  const parse = UserBody.safeParse(req.body); // love that you are doing this. great.
+  const parse = UserBody.safeParse(req.body);
   if (!parse.success)
     return res.status(400).json({ error: parse.error.message });
   const { email, github_username } = parse.data;
@@ -115,20 +100,6 @@ app.post('/users', async (req, res) => {
   }
 });
 
-// you definitely want to minimize commented-out code like below
-// if you don't need it, just remove it.
-
-// app.get('/users', async (_req, res) => {
-//   try {
-//     const rows = await query(
-//       `select * from users order by created_at desc limit 100;`
-//     );
-//     res.json({ users: rows });
-//   } catch (e) {
-//     res.status(500).json({ error: e.message });
-//   }
-// });
-
 app.get('/users', async (_req, res) => {
   try {
     const rows = await query(`
@@ -139,7 +110,7 @@ app.get('/users', async (_req, res) => {
         c.provider,
         c.access_token,
         c.created_at
-      from users u
+      from users u  
       left join connections c on u.id = c.user_id
       order by c.created_at desc
       limit 100;
@@ -174,23 +145,9 @@ you should keep your router names consistent:
 
 // also, i'd probably move these routes closer to the top of the file, so they're easier to find.
 
-app.use('/deployments', deploymentsRouter);
-app.use('/agent', agentRoutes);
-app.use('/mcp/v1', pipelineCommitRouter);
-app.use('/mcp/v1', mcpRoutes);
-
-app.use('/auth/github', githubAuthRouter);
-app.use(authRoutes);
-app.use('/auth/aws', authAws);
-
-app.use('/auth/google', authGoogle);
-
-app.use('/jenkins', jenkinsRouter);
-
-app.use('/pipeline-sessions', pipelineSessionsRouter);
 
 // --- Global Error Handler ---
-app.use((err, req, res, next) => {
+app.use((err, _req, res, _next) => {
   console.error('Global Error:', err);
   res.status(500).json({
     success: false,
@@ -199,5 +156,5 @@ app.use((err, req, res, next) => {
   });
 });
 
-const port = process.env.PORT || 4000;
+const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`API on http://localhost:${port}`));
