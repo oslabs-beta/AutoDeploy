@@ -1,0 +1,200 @@
+{
+  "info": {
+    "_postman_id": "b9e66a4f-98c5-4421-9b54-b7d65d583f81",
+    "name": "AutoDeploy - Pipeline Sessions",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1 - Create Pipeline Session",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "mcp_session={{mcp_session}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:3000/pipeline-sessions",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "3000",
+          "path": ["pipeline-sessions"]
+        }
+      }
+    },
+    {
+      "name": "2 - Select Repo",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "mcp_session={{mcp_session}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"repo_full_name\": \"{{repo_full_name}}\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:3000/pipeline-sessions/{{pipeline_session_id}}/select-repo",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "3000",
+          "path": ["pipeline-sessions", "{{pipeline_session_id}}", "select-repo"]
+        }
+      }
+    },
+    {
+      "name": "3 - Select Template",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "mcp_session={{mcp_session}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"provider\": \"aws\",\n  \"template\": \"node_app\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:3000/pipeline-sessions/{{pipeline_session_id}}/select-template",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "3000",
+          "path": ["pipeline-sessions", "{{pipeline_session_id}}", "select-template"]
+        }
+      }
+    },
+    {
+      "name": "4 - Generate YAML",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "mcp_session={{mcp_session}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:3000/pipeline-sessions/{{pipeline_session_id}}/generate-yaml",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "3000",
+          "path": ["pipeline-sessions", "{{pipeline_session_id}}", "generate-yaml"]
+        }
+      }
+    },
+    {
+      "name": "5 - Edit YAML (LLM Request)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "mcp_session={{mcp_session}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"user_request\": \"Add a deploy job to ECS.\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:3000/pipeline-sessions/{{pipeline_session_id}}/edit-yaml",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "3000",
+          "path": ["pipeline-sessions", "{{pipeline_session_id}}", "edit-yaml"]
+        }
+      }
+    },
+    {
+      "name": "5b - Edit YAML (Manual YAML)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "mcp_session={{mcp_session}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"draft_yaml\": \"name: Test Pipeline\\non: push\" \n}"
+        },
+        "url": {
+          "raw": "http://localhost:3000/pipeline-sessions/{{pipeline_session_id}}/edit-yaml",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "3000",
+          "path": ["pipeline-sessions", "{{pipeline_session_id}}", "edit-yaml"]
+        }
+      }
+    },
+    {
+      "name": "6 - Commit YAML",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "mcp_session={{mcp_session}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:3000/pipeline-sessions/{{pipeline_session_id}}/commit",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "3000",
+          "path": ["pipeline-sessions", "{{pipeline_session_id}}", "commit"]
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "mcp_session",
+      "value": ""
+    },
+    {
+      "key": "pipeline_session_id",
+      "value": ""
+    },
+    {
+      "key": "repo_full_name",
+      "value": ""
+    }
+  ]
+}

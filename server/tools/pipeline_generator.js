@@ -5,7 +5,6 @@ import { pool } from '../db.js';
 import jwt from 'jsonwebtoken';
 
 import { z } from 'zod';
-import { requireSession } from '../lib/requireSession.js';
 
 export const pipeline_generator = {
   name: 'pipeline_generator',
@@ -33,16 +32,8 @@ export const pipeline_generator = {
     let decoded = {};
     let userId = null;
 
-    // Try pulling from session
-    try {
-      const sessionData = await requireSession();
-      if (sessionData?.user?.id) {
-        userId = sessionData.user.id;
-        console.log('🧩 Resolved user_id from session:', userId);
-      }
-    } catch {
-      console.warn('⚠️ No active session found, trying token decode...');
-    }
+    // No req.cookies available in MCP tool mode — skip direct session lookups.
+    console.warn('⚠️ Skipping requireSession — tool is running without HTTP request context.');
 
     // Fallback: decode MCP_SESSION_TOKEN if no user found
     if (!userId && sessionToken) {

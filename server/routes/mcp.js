@@ -40,6 +40,7 @@ router.all('/github/:action', requireSession, async (req, res) => {
       ...req.body,
       action: req.params.action,
       user_id: req.user.user_id,
+      username: req.user.github_username
     };
     const validatedInput = tool.input_schema.parse(input);
     const data = await tool.handler(validatedInput);
@@ -63,8 +64,9 @@ router.all('/github', requireSession, async (req, res) => {
     const input = {
       ...req.query,
       ...req.body,
-      action: req.query.action || 'repos',
+      action: req.query.action || "repos",
       user_id: req.user.user_id,
+      username: req.user.github_username
     };
     const validatedInput = tool.input_schema.parse(input);
     const data = await tool.handler(validatedInput);
@@ -88,10 +90,13 @@ router.all('/:tool_name', requireSession, async (req, res) => {
   }
 
   try {
-    // Merge query + body to handle GET or POST
-    const input = { ...req.query, ...req.body };
-    // Inject authenticated user's ID before validation
-    input.user_id = req.user.user_id;
+    // Merge query + body to handle GET or POST, inject user_id and username
+    const input = {
+      ...req.query,
+      ...req.body,
+      user_id: req.user.user_id,
+      username: req.user.github_username
+    };
     const validatedInput = tool.input_schema.parse(input);
     const data = await tool.handler(validatedInput);
     res.json({ success: true, data });

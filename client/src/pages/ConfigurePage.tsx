@@ -5,6 +5,7 @@ import { useRepoStore } from "../store/useRepoStore";
 import { usePipelineStore } from "../store/usePipelineStore";
 import { useChatStore } from "../store/useChatStore";
 import { parseChatForPipeline, summarizeChanges } from "@/lib/aiAssist";
+import { GlassButton } from "@/components/ui/GlassButton";
 
 
 const STAGES = ["build", "test", "deploy"] as const;
@@ -110,16 +111,18 @@ export default function ConfigurePage() {
         </div>
 
         {/* history */}
-        <div className="rounded-lg bg-gray-100/60 p-3 max-h-64 overflow-auto">
+        <div className="rounded-lg bg-white/10 backdrop-blur-md p-3 max-h-64 overflow-auto border border-white/20 text-slate-100">
           {messages.map((m, i) => (
             <div key={i} className={`my-2 ${m.role === "user" ? "text-right" : ""}`}>
               <span
-                className={`inline-block rounded px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap ${
-                  m.role === "user" ? "bg-black text-white" : "bg-white border"
-                }`}
-              >
-                {m.text}
-              </span>
+  className={`inline-block rounded px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap ${
+    m.role === "user"
+      ? "bg-white/20 text-slate-100"
+      : "bg-white/10 border border-white/20 text-slate-200"
+  }`}
+>
+  {m.text}
+</span>
             </div>
           ))}
         </div>
@@ -131,14 +134,14 @@ export default function ConfigurePage() {
             "Node 18; npm ci; npm test; npm run build",
             "role arn:aws:iam::123456789012:role/app-ci",
           ].map((ex) => (
-            <button
+            <GlassButton
               key={ex}
               type="button"
               onClick={() => setInput(ex)}
               className="rounded-full border bg-white px-3 py-1 hover:bg-gray-50"
             >
               {ex}
-            </button>
+            </GlassButton>
           ))}
         </div>
 
@@ -156,7 +159,7 @@ export default function ConfigurePage() {
           <div className="flex items-center justify-between">
             <span className="text-xs opacity-70">Press ⌘/Ctrl + Enter to send</span>
             <div className="flex gap-2">
-              <button
+              <GlassButton
                 type="button"
                 onClick={() => {
                   // optional clear-chat button
@@ -166,14 +169,14 @@ export default function ConfigurePage() {
                 className="rounded-md border px-3 py-2 bg-white hidden"
               >
                 Clear
-              </button>
-              <button
+              </GlassButton>
+              <GlassButton
                 type="submit"
                 disabled={busy}
                 className="rounded-md border px-4 py-2 bg-white"
               >
                 {busy ? "…" : "Send"}
-              </button>
+              </GlassButton>
             </div>
           </div>
         </form>
@@ -222,7 +225,7 @@ export default function ConfigurePage() {
           disabled={busy}
           value={pipeline.options?.awsRoleArn ?? ""}
           onChange={(e) => pipeline.setOption?.("awsRoleArn", e.target.value)}
-          className="rounded-md border px-3 py-2"
+          className="rounded-md border px-3 py-2 text-white bg-black"
         >
           <option value="">-- select --</option>
           {pipeline.roles?.map((r: any) => (
@@ -235,14 +238,14 @@ export default function ConfigurePage() {
 
       {/* ====== Actions ====== */}
       <div className="flex gap-3">
-        <button
+        <GlassButton
           onClick={regenerateNow}
           disabled={busy}
           className="rounded-md border px-4 py-2 bg-white"
         >
           {busy ? "Generating…" : "Generate Pipeline"}
-        </button>
-        <button
+        </GlassButton>
+        <GlassButton
           onClick={() => navigate("/secrets")}
           disabled={
             !(
@@ -254,7 +257,7 @@ export default function ConfigurePage() {
           className="rounded-md border px-4 py-2 bg-white"
         >
           Continue → Secrets
-        </button>
+        </GlassButton>
       </div>
 
       {/* ====== YAML Preview ====== */}
