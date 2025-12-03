@@ -36,21 +36,25 @@ async function mcp<T>(tool: string, input: Record<string, any> = {}): Promise<T>
 export const api = {
   // ✅ method syntax (preferred)
   async listRepos(): Promise<{ repos: string[] }> {
-    const data = await mcp<{ repositories: { full_name: string; branches?: string[] }[] }>(
-      "repo_reader",
-      {}
-    );
-    const repos = (data.repositories ?? []).map(r => r.full_name);
+    const outer = await mcp<{
+      success: boolean;
+      data: { provider: string; user: string; repositories: { full_name: string }[] };
+    }>("repo_reader", {});
+
+    const inner = outer?.data;
+    const repos = inner?.repositories?.map(r => r.full_name) ?? [];
     return { repos };
   },
 
   async listBranches(repo: string): Promise<{ branches: string[] }> {
-    const data = await mcp<{ repositories: { full_name: string; branches?: string[] }[] }>(
-      "repo_reader",
-      {}
-    );
-    const item = (data.repositories ?? []).find(r => r.full_name === repo);
-    return { branches: item?.branches ?? [] };
+    const outer = await mcp<{
+      success: boolean;
+      data: { provider: string; user: string; repositories: { full_name: string; branches?: string[] }[] };
+    }>("repo_reader", {});
+
+    const inner = outer?.data;
+    const match = inner?.repositories?.find(r => r.full_name === repo);
+    return { branches: match?.branches ?? [] };
   },
 
   async createPipeline(payload: any) {
