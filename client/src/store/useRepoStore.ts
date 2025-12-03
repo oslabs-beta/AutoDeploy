@@ -43,16 +43,22 @@ export const useRepoStore = create<RepoState & RepoActions>()(
       setBranch: (b) => set({ branch: b }),
 
       async loadRepos() {
+        console.log("[Store] loadRepos() start");
         set({ loading: true, error: undefined });
+
         try {
-          const { repos } = await api.listRepos(); // requires session cookie from OAuth
+          const result = await api.listRepos();
+          console.log("[Store] loadRepos() result:", result);
+
           set({
-            repos: repos ?? [],
-            connected: true,      // ← we’re authenticated
+            repos: result?.repos ?? [],
+            connected: true,
             loading: false,
           });
+
+          console.log("[Store] loadRepos() repos saved:", result?.repos);
         } catch (e: any) {
-          // If unauthorized, backend should return 401 and this sets connected false.
+          console.error("[Store] loadRepos() error:", e);
           set({
             error: e?.message ?? String(e),
             connected: false,
@@ -63,18 +69,28 @@ export const useRepoStore = create<RepoState & RepoActions>()(
       },
 
       async loadBranches(repo: string) {
+        console.log("[Store] loadBranches() start for repo:", repo);
         set({ loading: true, error: undefined, repo, branch: null, branches: [] });
+
         try {
-          const { branches } = await api.listBranches(repo);
-          // Optional: preselect a sensible default branch
-          const list = branches ?? [];
-          const preferred = list.find(b => b === "main") ?? list.find(b => b === "master") ?? null;
+          const result = await api.listBranches(repo);
+          console.log("[Store] loadBranches() result:", result);
+
+          const list = result?.branches ?? [];
+          const preferred =
+            list.find(b => b === "main") ??
+            list.find(b => b === "master") ??
+            null;
+
           set({
             branches: list,
             branch: preferred,
             loading: false,
           });
+
+          console.log("[Store] loadBranches() branches saved:", list);
         } catch (e: any) {
+          console.error("[Store] loadBranches() error:", e);
           set({
             error: e?.message ?? String(e),
             loading: false,
