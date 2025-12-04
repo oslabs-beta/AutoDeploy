@@ -195,7 +195,7 @@ ALTER TABLE public.deployment_logs
                                └──────────────────────────┘
 
 Adding this line to test the workflows
-Another test
+Another test2
 
 Test
 ```
