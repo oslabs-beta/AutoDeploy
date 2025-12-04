@@ -132,20 +132,6 @@ app.get('/connections', async (_req, res) => {
   }
 });
 
-// -- Agent entry point
-
-/*
-you should keep your router names consistent:
-  - deploymentsRouter
-  - agentRouter (not agentRoutes)
-  - authAwsRouter (not authAws)
-  - authGoogleRouter (not authGoogle)
-  etc.
-*/
-
-// also, i'd probably move these routes closer to the top of the file, so they're easier to find.
-
-
 // --- Global Error Handler ---
 app.use((err, _req, res, _next) => {
   console.error('Global Error:', err);
