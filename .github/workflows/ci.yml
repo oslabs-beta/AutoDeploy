@@ -4,6 +4,8 @@ on:
     branches:
       - main
       - lorenc-ci
+      - paython-mcp
+      - feature/configure-chat-ui
 
   workflow_dispatch:
     inputs:

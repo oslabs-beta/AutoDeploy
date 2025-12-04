@@ -5,6 +5,8 @@ on:
     branches:
       - main
       - lorenc-ci
+      - paython-mcp
+      - feature/configure-chat-ui
   pull_request:
     branches:
       - main
@@ -69,3 +71,47 @@ jobs:
         run: |
           docker push $IMAGE_ID:$VERSION
           docker push $IMAGE_ID:latest
+
+  deploy-gcp:
+    needs: docker-image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          service_account_key: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          export_default_credentials: true
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker us-east1-docker.pkg.dev
+
+      - name: Pull image from GHCR
+        run: |
+          IMAGE_ID=ghcr.io/${{ github.repository_owner }}/mcp-backend
+          VERSION=${{ github.sha }}
+          echo "IMAGE_ID=$IMAGE_ID" >> $GITHUB_ENV
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker pull $IMAGE_ID:$VERSION
+
+      - name: Tag and push image to Artifact Registry
+        run: |
+          AR_IMAGE=us-east1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/mcp-backend/mcp-backend
+          docker tag ghcr.io/${{ github.repository_owner }}/mcp-backend:${{ github.sha }} $AR_IMAGE:${{ github.sha }}
+          docker push $AR_IMAGE:${{ github.sha }}
+          echo "AR_IMAGE=$AR_IMAGE" >> $GITHUB_ENV
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy mcp-backend \
+            --image $AR_IMAGE:${{ github.sha }} \
+            --region ${{ secrets.GCP_REGION }} \
+            --platform managed \
+            --allow-unauthenticated \
+            --port 3000
