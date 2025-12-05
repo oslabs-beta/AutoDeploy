@@ -48,7 +48,10 @@ export default function ConnectPage() {
             <GlassButton
               variant="secondary"
               className="bg-white/20 hover:bg-white/30 text-white"
-              onClick={loadRepos}
+              onClick={() => {
+                console.log("[Page] Re-sync clicked");
+                loadRepos();
+              }}
             >
               Re-sync Repos
             </GlassButton>
@@ -61,6 +64,7 @@ export default function ConnectPage() {
             <Select
               value={repo ?? ""}
               onValueChange={(v) => {
+                console.log("[Page] Repo selected:", v);
                 setRepo(v);
                 loadBranches(v);
               }}
