@@ -33,11 +33,25 @@ pool.on('error', (err) =>
 // It also logs query duration in non‑production environments to help
 // track slow queries during development.
 
+// export async function query(sql, params = []) {
+//   const start = Date.now();
+//   const res = await pool.query(sql, params);
+//   const ms = Date.now() - start;
+
+//   if (process.env.NODE_ENV !== 'production') {
+//     console.log(`SQL ${ms}ms: `, sql, params);
+//   }
+//   return res;
+// }
+
+// export async function healthCheck() {
+//   const rows = await query('select 1 as ok');
+//   return rows?.[0]?.ok === 1;
+// }
 export async function query(sql, params = []) {
   const start = Date.now();
   const res = await pool.query(sql, params);
   const ms = Date.now() - start;
-
   if (process.env.NODE_ENV !== 'production') {
     console.log(`SQL ${ms}ms: `, sql, params);
   }
@@ -45,6 +59,7 @@ export async function query(sql, params = []) {
 }
 
 export async function healthCheck() {
-  const rows = await query('select 1 as ok');
-  return rows?.[0]?.ok === 1;
+  const { rows } = await query('select 1 as ok');
+  const ok = rows?.[0]?.ok;
+  return ok === 1 || ok === '1';
 }

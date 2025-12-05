@@ -2,13 +2,18 @@ name: CI & Docker
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - lorenc-ci
+      - paython-mcp
+      - feature/configure-chat-ui
   pull_request:
-    branches: [main]
+    branches:
+      - main
 
 jobs:
   build-test:
-    runs-on: unbuntu-latest
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -32,7 +37,7 @@ jobs:
 
   docker-image:
     needs: build-test
-    runs-on: unbuntu-latest
+    runs-on: ubuntu-latest
 
     permissions:
       contents: read
@@ -66,3 +71,53 @@ jobs:
         run: |
           docker push $IMAGE_ID:$VERSION
           docker push $IMAGE_ID:latest
+
+  deploy-gcp:
+    needs: docker-image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker us-east1-docker.pkg.dev --quiet
+
+      - name: Pull image from GHCR
+        run: |
+          IMAGE_ID=ghcr.io/${{ github.repository_owner }}/mcp-backend
+          VERSION=${{ github.sha }}
+          echo "IMAGE_ID=$IMAGE_ID" >> $GITHUB_ENV
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker pull $IMAGE_ID:$VERSION
+
+      - name: Tag and push image to Artifact Registry
+        run: |
+          AR_IMAGE=us-east1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/mcp-backend/mcp-backend
+          docker tag ghcr.io/${{ github.repository_owner }}/mcp-backend:${{ github.sha }} $AR_IMAGE:${{ github.sha }}
+          docker push $AR_IMAGE:${{ github.sha }}
+          echo "AR_IMAGE=$AR_IMAGE" >> $GITHUB_ENV
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy mcp-backend \
+            --image $AR_IMAGE:${{ github.sha }} \
+            --region ${{ secrets.GCP_REGION }} \
+            --platform managed \
+            --allow-unauthenticated \
+            --port 3000
