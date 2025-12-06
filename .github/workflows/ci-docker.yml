@@ -34,7 +34,7 @@ jobs:
         run: |
           cd server
           npm test --if-present
-
+  # backend image
   docker-image:
     needs: build-test
     runs-on: ubuntu-latest
@@ -72,6 +72,45 @@ jobs:
           docker push $IMAGE_ID:$VERSION
           docker push $IMAGE_ID:latest
 
+  # frontend image
+  frontend-docker-image:
+    needs: build-test
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    env:
+      IMAGE_NAME: mcp-frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build frontend Docker image
+        run: |
+          IMAGE_ID=ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          VERSION=${{ github.sha }}
+
+          echo "FRONTEND_IMAGE_ID=$IMAGE_ID" >> $GITHUB_ENV
+          echo "FRONTEND_VERSION=$VERSION >> $GITHUB_ENV
+
+          docker build -f Dockerfile.frontend -t $IMAGE_ID:VERSION -t $IMAGE_ID:latest .
+
+      - name:
+        run: |
+          docker push $FRONTEND_IMAGE_ID:$FRONTEND_VERSION
+          docker push $FRONTEND_IMAGE_ID:latest
+
+  # backend cloud deployment
   deploy-gcp:
     needs: docker-image
     runs-on: ubuntu-latest
@@ -121,3 +160,54 @@ jobs:
             --platform managed \
             --allow-unauthenticated \
             --port 3000
+
+  # frontend cloud deployment
+  deploy-gcp-frontend:
+    needs: frontend-docker-image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker us-east1-docker.pkg.dev --quiet
+
+      - name: Pull frontend image from GHCR
+        run: |
+          IMAGE_ID=ghcr.io/${{ github.repository_owner }}/mcp-frontend
+          VERSION=${{ github.sha }}
+          echo "FRONTEND_IMAGE_ID=$IMAGE_ID" >> $GITHUB_ENV
+          echo "FRONTEND_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker pull $IMAGE_ID:$VERSION
+
+      - name: Tag & push frontend image to Artifact Registry
+        run: |
+          AR_FRONTEND_IMAGE=us-east1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/mcp-frontend/mcp-frontend
+          docker tag ghcr.io/${{ github.repository_owner }}/mcp-frontend:${{ github.sha }} $AR_FRONTEND_IMAGE:${{ github.sha }}
+          docker push $AR_FRONTEND_IMAGE:${{ github.sha }}
+          echo "AR_FRONTEND_IMAGE=$AR_FRONTEND_IMAGE" >> $GITHUB_ENV
+
+      - name: Deploy frontend to Cloud Run
+        run: |
+          gcloud run deploy mcp-frontend \
+            --image $AR_FRONTEND_IMAGE:${{ github.sha }} \
+            --region ${{ secrets.GCP_REGION }} \
+            --platform managed \
+            --allow-unauthenticated \
+            --port 80
