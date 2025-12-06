@@ -35,7 +35,7 @@ jobs:
           cd server
           npm test --if-present
   # backend image
-  docker-image:
+  backend-docker-image:
     needs: build-test
     runs-on: ubuntu-latest
 
@@ -101,7 +101,7 @@ jobs:
           VERSION=${{ github.sha }}
 
           echo "FRONTEND_IMAGE_ID=$IMAGE_ID" >> $GITHUB_ENV
-          echo "FRONTEND_VERSION=$VERSION >> $GITHUB_ENV
+          echo "FRONTEND_VERSION=$VERSION" >> $GITHUB_ENV
 
           docker build -f Dockerfile.frontend -t $IMAGE_ID:VERSION -t $IMAGE_ID:latest .
 
@@ -111,7 +111,7 @@ jobs:
           docker push $FRONTEND_IMAGE_ID:latest
 
   # backend cloud deployment
-  deploy-gcp:
+  deploy-gcp-backend:
     needs: docker-image
     runs-on: ubuntu-latest
     permissions:
