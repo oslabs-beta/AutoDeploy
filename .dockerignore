@@ -1,6 +1,7 @@
 node_modules
 npm-debug.log
 Dockerfile
+Dockerfile.frontend
 Dockerfile.jenkins
 docker-compose*.yml
 .git
