@@ -34,7 +34,7 @@ jobs:
         run: |
           cd server
           npm test --if-present
-  # backend image
+  #backend image
   docker-image:
     needs: build-test
     runs-on: ubuntu-latest
@@ -72,7 +72,7 @@ jobs:
           docker push $IMAGE_ID:$VERSION
           docker push $IMAGE_ID:latest
 
-  # frontend image
+  #frontend image
   frontend-docker-image:
     needs: build-test
     runs-on: ubuntu-latest
@@ -103,14 +103,14 @@ jobs:
           echo "FRONTEND_IMAGE_ID=$IMAGE_ID" >> $GITHUB_ENV
           echo "FRONTEND_VERSION=$VERSION" >> $GITHUB_ENV
 
-          docker build -f Dockerfile.frontend -t $IMAGE_ID:VERSION -t $IMAGE_ID:latest .
+          docker build -f Dockerfile.frontend -t $IMAGE_ID:$VERSION -t $IMAGE_ID:latest .
 
-      - name:
+      - name: Push frontend Docker image
         run: |
           docker push $FRONTEND_IMAGE_ID:$FRONTEND_VERSION
           docker push $FRONTEND_IMAGE_ID:latest
 
-  # backend cloud deployment
+  #backend cloud deployment
   deploy-gcp:
     needs: docker-image
     runs-on: ubuntu-latest
