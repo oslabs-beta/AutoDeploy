@@ -107,10 +107,10 @@ jobs:
             --build-arg VITE_API_BASE_URL=${{ secrets.FRONTEND_API_BASE_URL }} \
             -t $IMAGE_ID:$VERSION -t $IMAGE_ID:latest .
 
-          - name: Push frontend Docker image
-            run: |
-              docker push $FRONTEND_IMAGE_ID:$FRONTEND_VERSION
-              docker push $FRONTEND_IMAGE_ID:latest
+      - name: Push frontend Docker image
+        run: |
+          docker push $FRONTEND_IMAGE_ID:$FRONTEND_VERSION
+          docker push $FRONTEND_IMAGE_ID:latest
 
   #backend cloud deployment
   deploy-gcp:
