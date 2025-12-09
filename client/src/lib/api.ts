@@ -23,6 +23,8 @@ const API_BASE_URL =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ||
   'http://localhost:3000';
 
+export const BASE = API_BASE_URL;
+
 function buildUrl(path: string) {
   const base = API_BASE_URL.replace(/\/+$/, '');
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
