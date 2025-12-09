@@ -152,3 +152,4 @@ jenkins.pem
 
 # Local change log (Chinese summary)
 change_log_cn.md
+client/.env
