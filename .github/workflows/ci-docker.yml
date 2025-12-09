@@ -103,7 +103,9 @@ jobs:
           echo "FRONTEND_IMAGE_ID=$IMAGE_ID" >> $GITHUB_ENV
           echo "FRONTEND_VERSION=$VERSION" >> $GITHUB_ENV
 
-          docker build -f Dockerfile.frontend -t $IMAGE_ID:$VERSION -t $IMAGE_ID:latest .
+          docker build -f Dockerfile.frontend \
+            --build-arg VITE_API_BASE_URL=${{ secrets.FRONTEND_API_BASE_URL }} \
+            -t $IMAGE_ID:$VERSION -t $IMAGE_ID:latest .
 
       - name: Push frontend Docker image
         run: |
