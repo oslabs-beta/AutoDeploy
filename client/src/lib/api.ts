@@ -24,6 +24,7 @@ const API_BASE_URL =
   'http://localhost:3000';
 
 export const BASE = API_BASE_URL;
+console.log('[API_BASE_URL]', API_BASE_URL);
 
 function buildUrl(path: string) {
   const base = API_BASE_URL.replace(/\/+$/, '');
