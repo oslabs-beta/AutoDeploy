@@ -6,6 +6,7 @@ Dockerfile.jenkins
 docker-compose*.yml
 .git
 .gitignore
-.env
+/.env
+/server/.env
 .vscode
 dist
