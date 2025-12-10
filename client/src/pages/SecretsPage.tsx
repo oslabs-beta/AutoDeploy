@@ -11,7 +11,8 @@ export default function SecretsPage() {
   useEffect(() => {
     if (repo) cfg.load(repo).catch(console.error);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repo, cfg.env]);
+  }, [repo]); //this line was causing the infinite loop
+  //}, [repo, cfg.env]);
 
   const allGreen = useMemo(
     () => (cfg.preflightResults?.length ?? 0) > 0 && cfg.preflightResults!.every(r => r.ok),

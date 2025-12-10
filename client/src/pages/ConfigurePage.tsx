@@ -1,532 +1,422 @@
-// client/src/pages/ConfigurePage.tsx
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useRepoStore } from "../store/useRepoStore";
 import { usePipelineStore } from "../store/usePipelineStore";
-import { useChatStore } from "../store/useChatStore";
-import { parseChatForPipeline, summarizeChanges } from "@/lib/aiAssist";
-import { GlassButton } from "@/components/ui/GlassButton";
+import { api } from "../lib/api";
 
-
-const STAGES = ["build", "test", "deploy"] as const;
+type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
 
 export default function ConfigurePage() {
   const { repo, branch } = useRepoStore();
-  const pipeline = usePipelineStore();
-  const navigate = useNavigate();
-  const [busy, setBusy] = useState(false);
 
-  // Chat (persisted via Zustand)
-  const messages = useChatStore((s) => s.messages);
-  const input = useChatStore((s) => s.input);
-  const setInput = useChatStore((s) => s.setInput);
-  const addUser = useChatStore((s) => s.addUser);
-  const addAssistant = useChatStore((s) => s.addAssistant);
-  const resetChat = useChatStore.getState().reset;
+  const {
+    template,
+    stages,
+    options,
+    roles,
+    status,
+    error,
+    result,
+    setTemplate,
+    toggleStage,
+    setOption,
+    loadAwsRoles,
+    regenerate,
+    openPr,
+    editing,
+    setEditing,
+    editedYaml,
+    setEditedYaml,
+    getEffectiveYaml,
+  } = usePipelineStore();
 
+  const yaml = getEffectiveYaml();
+  const busy = status === "loading";
+
+  // ---- AI Wizard Chat State ----
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    {
+      role: "assistant",
+      content:
+        "Hi! I'm your CI/CD wizard. Tell me about your repo and how you'd like your GitHub Actions YAML to behave (build, test, deploy, environments, branches, etc.).",
+    },
+  ]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+
+  // Load AWS roles when repo/branch is picked
   useEffect(() => {
     if (!repo || !branch) return;
-    pipeline.loadAwsRoles?.().catch(console.error);
-  }, [repo, branch, pipeline]);
+    loadAwsRoles().catch(console.error);
+  }, [repo, branch, loadAwsRoles]);
 
-  async function regenerateNow() {
-    if (!repo || !branch) return;
-    setBusy(true);
-    try {
-      await pipeline.regenerate?.({ repo, branch });
-    } finally {
-      setBusy(false);
+  const handleGenerate = async () => {
+    if (!repo || !branch) {
+      alert("Pick a repo + branch on the Connect page first.");
+      return;
     }
+    await regenerate({ repo, branch });
+  };
+
+  const handleOpenPr = async () => {
+    if (!repo || !branch) {
+      alert("Pick a repo + branch on the Connect page first.");
+      return;
+    }
+    try {
+      await openPr({ repo, branch });
+      alert("PR opened (or queued) successfully!");
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message ?? "Failed to open PR");
+    }
+  };
+
+  const toggleStageChecked = (stage: "build" | "test" | "deploy") =>
+    stages.includes(stage);
+
+  // ---- AI Wizard: send message ----
+  const handleSendChat = async () => {
+    const trimmed = chatInput.trim();
+    if (!trimmed) return;
+
+    if (!repo || !branch) {
+      alert("Pick a repo + branch on the Connect page first so I can give better suggestions.");
+      return;
+    }
+
+    const userMessage: ChatMessage = { role: "user", content: trimmed };
+    setChatMessages((prev) => [...prev, userMessage]);
+    setChatInput("");
+    setChatLoading(true);
+
+      try {
+    const res = await api.askYamlWizard({
+      repoUrl: repo,       // backend expects "repoUrl"
+      provider: "aws",     // or whatever provider you use
+      branch: branch,      // backend expects "branch"
+      message: trimmed,    // optional, for your agent logic
+      yaml,                // optional, current YAML for context
+    });
+
+         const text =
+      (res as any)?.reply ??
+      (res as any)?.message ??
+      (res as any)?.content ??
+      JSON.stringify(res, null, 2);
+
+    const assistantMessage: ChatMessage = {
+      role: "assistant",
+      content: text,
+    };
+
+    setChatMessages((prev) => [...prev, assistantMessage]);
+  } catch (e: any) {
+    console.error("[ConfigurePage] AI wizard error:", e);
+    const assistantMessage: ChatMessage = {
+      role: "assistant",
+      content:
+        "Sorry, I ran into an issue talking to the AI backend.\n\n" +
+        `Error: ${e?.message ?? "Unknown error"}`,
+    };
+    setChatMessages((prev) => [...prev, assistantMessage]);
+  } finally {
+    setChatLoading(false);
   }
+};
 
-  async function onSendChat(e?: React.FormEvent) {
-    e?.preventDefault();
-    const message = input.trim();
-    if (!message) return;
-
-    addUser(message);
-    setInput("");
-
-    const changes = parseChatForPipeline(message);
-    if (changes.nodeVersion) pipeline.setOption?.("nodeVersion", changes.nodeVersion);
-    if (changes.installCmd) pipeline.setOption?.("installCmd", changes.installCmd);
-    if (changes.testCmd) pipeline.setOption?.("testCmd", changes.testCmd);
-    if (changes.buildCmd) pipeline.setOption?.("buildCmd", changes.buildCmd);
-    if (changes.awsRoleArn) pipeline.setOption?.("awsRoleArn", changes.awsRoleArn);
-
-    await regenerateNow();
-    addAssistant(summarizeChanges(changes));
-  }
+  const handleChatKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (
+    e
+  ) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSendChat();
+    }
+  };
 
   return (
-    <section className="grid gap-4 p-6 max-w-5xl mx-auto">
-      {/* Header */}
-      <div className="flex items-baseline justify-between">
-        <h1 className="text-2xl font-semibold">Configure Pipeline</h1>
-        <div className="text-sm opacity-70">
+    <div className="min-h-screen bg-slate-100">
+      <div className="max-w-6xl mx-auto p-6 space-y-8">
+        {/* Header */}
+        <header className="space-y-1">
+          <h1 className="text-3xl font-semibold tracking-tight">
+            Configure CI/CD pipeline
+          </h1>
           {repo && branch ? (
-            <>
-              <span className="font-mono">{repo}</span>@<span className="font-mono">{branch}</span>
-            </>
+            <p className="text-sm text-slate-600">
+              Targeting{" "}
+              <span className="font-mono text-slate-900">{repo}</span> @{" "}
+              <span className="font-mono text-slate-900">{branch}</span>
+            </p>
           ) : (
-            <span className="text-orange-700">Pick a repo/branch on Connect first.</span>
+            <p className="text-sm text-amber-700">
+              Pick a GitHub repo + branch on the Connect page first.
+            </p>
           )}
-        </div>
-      </div>
+        </header>
 
-      {/* Template */}
-      <label className="space-y-2">
-        <div className="font-medium">Template</div>
-        <select
-          value={pipeline.template ?? "node_app"}
-          onChange={(e) => pipeline.setTemplate?.(e.target.value)}
-          className="block rounded-md border px-3 py-2"
-        >
-          <option value="node_app">Node.js</option>
-          {/* add more templates here */}
-        </select>
-      </label>
-
-      {/* Stages */}
-      <div>
-        <div className="font-medium mb-1">Stages</div>
-        <div className="flex gap-4">
-          {STAGES.map((s) => (
-            <label key={s} className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={!!pipeline.stages?.includes(s)}
-                onChange={() => pipeline.toggleStage?.(s)}
-              />
-              {s}
-            </label>
-          ))}
-        </div>
-      </div>
-
-      {/* ====== AI Chat Assist (persisted) ====== */}
-      <div className="grid gap-2">
-        <div className="text-sm font-medium">
-          Chat with AI about Node version, install/test/build commands, and AWS role
-        </div>
-
-        {/* history */}
-        <div className="rounded-lg bg-white/10 backdrop-blur-md p-3 max-h-64 overflow-auto border border-white/20 text-slate-100">
-          {messages.map((m, i) => (
-            <div key={i} className={`my-2 ${m.role === "user" ? "text-right" : ""}`}>
-              <span
-  className={`inline-block rounded px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap ${
-    m.role === "user"
-      ? "bg-white/20 text-slate-100"
-      : "bg-white/10 border border-white/20 text-slate-200"
-  }`}
->
-  {m.text}
-</span>
-            </div>
-          ))}
-        </div>
-
-        {/* examples */}
-        <div className="flex flex-wrap gap-2 text-xs">
-          {[
-            "Use Node 20, pnpm; test with vitest; build with pnpm build",
-            "Node 18; npm ci; npm test; npm run build",
-            "role arn:aws:iam::123456789012:role/app-ci",
-          ].map((ex) => (
-            <GlassButton
-              key={ex}
-              type="button"
-              onClick={() => setInput(ex)}
-              className="rounded-full border bg-white px-3 py-1 hover:bg-gray-50"
-            >
-              {ex}
-            </GlassButton>
-          ))}
-        </div>
-
-        {/* input */}
-        <form onSubmit={onSendChat} className="grid gap-2">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="e.g., Use Node 20 and pnpm. Test with vitest. Build with pnpm build. Role arn:aws:iam::123...:role/ci"
-            className="rounded-md border px-3 py-2 min-h-[110px] text-[0.95rem]"
-            onKeyDown={(e) => {
-              if ((e.ctrlKey || e.metaKey) && e.key === "Enter") onSendChat(e);
-            }}
-          />
-          <div className="flex items-center justify-between">
-            <span className="text-xs opacity-70">Press ⌘/Ctrl + Enter to send</span>
-            <div className="flex gap-2">
-              <GlassButton
-                type="button"
-                onClick={() => {
-                  // optional clear-chat button
-                  const resetChat = useChatStore.getState().reset;
-                  // TS-friendly: import at top if you prefer
-                }}
-                className="rounded-md border px-3 py-2 bg-white hidden"
-              >
-                Clear
-              </GlassButton>
-              <GlassButton
-                type="submit"
+        {/* Top grid: Config form (left) + AI wizard (right) */}
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* ===== Left: Config form ===== */}
+          <section className="space-y-6 rounded-xl border bg-white/90 p-4 shadow-sm">
+            {/* Template */}
+            <label className="grid gap-1">
+              <span className="text-sm font-medium">Template</span>
+              <select
                 disabled={busy}
-                className="rounded-md border px-4 py-2 bg-white"
+                value={template}
+                onChange={(e) => setTemplate(e.target.value)}
+                className="rounded-md border px-3 py-2 text-sm"
               >
-                {busy ? "…" : "Send"}
-              </GlassButton>
+                <option value="node_app">Node.js app</option>
+                <option value="node_library">Node.js library</option>
+                <option value="react_vite">React/Vite app</option>
+              </select>
+              <span className="text-xs text-slate-500">
+                Pick the closest match to your repo; the MCP backend refines it.
+              </span>
+            </label>
+
+            {/* Stages */}
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium">Enabled stages</legend>
+              <div className="flex flex-wrap gap-3">
+                {(["build", "test", "deploy"] as const).map((stage) => (
+                  <label
+                    key={stage}
+                    className="inline-flex items-center gap-2 text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      disabled={busy}
+                      checked={toggleStageChecked(stage)}
+                      onChange={() => toggleStage(stage)}
+                      className="h-4 w-4 rounded border-slate-300"
+                    />
+                    <span className="capitalize">{stage}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+
+            {/* Node version + commands */}
+            <div className="grid gap-4">
+              <label className="grid gap-1">
+                <span className="text-sm font-medium">Node version</span>
+                <input
+                  disabled={busy}
+                  value={options.nodeVersion}
+                  onChange={(e) => setOption("nodeVersion", e.target.value)}
+                  className="rounded-md border px-3 py-2 text-sm font-mono"
+                  placeholder="20"
+                />
+              </label>
+
+              <label className="grid gap-1">
+                <span className="text-sm font-medium">Install command</span>
+                <input
+                  disabled={busy}
+                  value={options.installCmd}
+                  onChange={(e) => setOption("installCmd", e.target.value)}
+                  className="rounded-md border px-3 py-2 text-sm font-mono"
+                  placeholder="npm ci"
+                />
+              </label>
+
+              <label className="grid gap-1">
+                <span className="text-sm font-medium">Test command</span>
+                <input
+                  disabled={busy}
+                  value={options.testCmd}
+                  onChange={(e) => setOption("testCmd", e.target.value)}
+                  className="rounded-md border px-3 py-2 text-sm font-mono"
+                  placeholder="npm test"
+                />
+              </label>
+
+              <label className="grid gap-1">
+                <span className="text-sm font-medium">Build command</span>
+                <input
+                  disabled={busy}
+                  value={options.buildCmd}
+                  onChange={(e) => setOption("buildCmd", e.target.value)}
+                  className="rounded-md border px-3 py-2 text-sm font-mono"
+                  placeholder="npm run build"
+                />
+              </label>
             </div>
+
+            {/* AWS Role */}
+            <label className="grid gap-1">
+              <span className="text-sm font-medium">AWS Role (OIDC)</span>
+              <select
+                disabled={busy || !roles.length}
+                value={options.awsRoleArn ?? ""}
+                onChange={(e) => setOption("awsRoleArn", e.target.value)}
+                className="rounded-md border px-3 py-2 text-sm bg-black text-white"
+              >
+                <option value="">-- select --</option>
+                {roles.map((r) => (
+                  <option key={r.arn} value={r.arn}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs text-slate-500">
+                Roles come from the backend OIDC adapter; we’ll wire this into
+                the deploy job.
+              </span>
+            </label>
+
+            {/* Generate / Open PR buttons */}
+            <div className="flex flex-wrap items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={handleGenerate}
+                disabled={busy || !repo || !branch}
+                className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {busy ? "Generating…" : "Generate pipeline"}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleOpenPr}
+                disabled={!result || !yaml}
+                className="rounded-md border border-slate-900 px-4 py-2 text-sm font-medium text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Open PR with YAML
+              </button>
+
+              {status === "success" && (
+                <span className="text-xs text-emerald-700">
+                  YAML ready — review or edit below, then open a PR.
+                </span>
+              )}
+            </div>
+
+            {error && (
+              <p className="text-sm text-red-600">
+                Error: {error}
+              </p>
+            )}
+          </section>
+
+          {/* ===== Right: AI YAML Wizard Chat ===== */}
+          <section className="flex flex-col rounded-xl border bg-white/90 p-4 shadow-sm">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div>
+                <h2 className="text-sm font-medium">AI YAML wizard</h2>
+                <p className="text-xs text-slate-500">
+                  Describe how you want your workflow to behave. I’ll suggest
+                  envs, branches, caching, matrix builds, etc.
+                </p>
+              </div>
+            </div>
+
+            {/* Chat messages */}
+            <div className="flex-1 min-h-[200px] max-h-[320px] overflow-y-auto rounded-md border bg-slate-50 px-3 py-2 space-y-2">
+              {chatMessages.map((m, idx) => (
+                <div
+                  key={idx}
+                  className={`flex ${
+                    m.role === "user" ? "justify-end" : "justify-start"
+                  }`}
+                >
+                  <div
+                    className={`rounded-lg px-3 py-2 text-xs whitespace-pre-wrap ${
+                      m.role === "user"
+                        ? "bg-slate-900 text-white"
+                        : "bg-white text-slate-900 border border-slate-200"
+                    } max-w-[80%]`}
+                  >
+                    {m.content}
+                  </div>
+                </div>
+              ))}
+              {chatLoading && (
+                <p className="text-[11px] text-slate-500">
+                  Thinking about your pipeline…
+                </p>
+              )}
+            </div>
+
+            {/* Chat input */}
+            <div className="mt-3 space-y-2">
+              <textarea
+                className="w-full rounded-md border px-3 py-2 text-xs resize-none"
+                rows={3}
+                placeholder="E.g. I want this to run only on main and PRs, use Node 20, cache npm, and deploy to prod on tags starting with v*…"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={handleChatKeyDown}
+                disabled={chatLoading}
+              />
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleSendChat}
+                  disabled={chatLoading || !chatInput.trim()}
+                  className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {chatLoading ? "Asking…" : "Ask wizard"}
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        {/* ===== YAML Preview / Editor (full width) ===== */}
+        <section className="space-y-3 rounded-xl border bg-slate-950 text-slate-100 p-4 shadow-sm">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-medium">GitHub Actions YAML</h2>
+              <p className="text-xs text-slate-400">
+                Review the generated workflow. Switch to manual mode to tweak
+                before opening a PR.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setEditing(!editing)}
+              disabled={!result}
+              className="rounded-md border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {editing ? "Back to wizard view" : "Edit YAML manually"}
+            </button>
           </div>
-        </form>
-      </div>
 
-      {/* ====== Options (auto-updated by chat) ====== */}
-      <div className="grid gap-3">
-        <label className="grid gap-1">
-          <span className="text-sm font-medium">Node version</span>
-          <input
-            value={pipeline.options?.nodeVersion ?? ""}
-            onChange={(e) => pipeline.setOption?.("nodeVersion", e.target.value)}
-            className="rounded-md border px-3 py-2"
-          />
-        </label>
-        <label className="grid gap-1">
-          <span className="text-sm font-medium">Install command</span>
-          <input
-            value={pipeline.options?.installCmd ?? ""}
-            onChange={(e) => pipeline.setOption?.("installCmd", e.target.value)}
-            className="rounded-md border px-3 py-2"
-          />
-        </label>
-        <label className="grid gap-1">
-          <span className="text-sm font-medium">Test command</span>
-          <input
-            value={pipeline.options?.testCmd ?? ""}
-            onChange={(e) => pipeline.setOption?.("testCmd", e.target.value)}
-            className="rounded-md border px-3 py-2"
-          />
-        </label>
-        <label className="grid gap-1">
-          <span className="text-sm font-medium">Build command</span>
-          <input
-            value={pipeline.options?.buildCmd ?? ""}
-            onChange={(e) => pipeline.setOption?.("buildCmd", e.target.value)}
-            className="rounded-md border px-3 py-2"
-          />
-        </label>
-      </div>
+          {status === "loading" && (
+            <p className="text-xs text-slate-400">Generating pipeline…</p>
+          )}
 
-      {/* ====== AWS Role ====== */}
-      <label className="grid gap-1">
-        <span className="text-sm font-medium">AWS Role (OIDC)</span>
-        <select
-          disabled={busy}
-          value={pipeline.options?.awsRoleArn ?? ""}
-          onChange={(e) => pipeline.setOption?.("awsRoleArn", e.target.value)}
-          className="rounded-md border px-3 py-2 text-white bg-black"
-        >
-          <option value="">-- select --</option>
-          {pipeline.roles?.map((r: any) => (
-            <option key={r.arn} value={r.arn}>
-              {r.name}
-            </option>
-          ))}
-        </select>
-      </label>
+          {!result && status !== "loading" && (
+            <p className="text-xs text-slate-500">
+              Generate a pipeline above to see the YAML preview.
+            </p>
+          )}
 
-      {/* ====== Actions ====== */}
-      <div className="flex gap-3">
-        <GlassButton
-          onClick={regenerateNow}
-          disabled={busy}
-          className="rounded-md border px-4 py-2 bg-white"
-        >
-          {busy ? "Generating…" : "Generate Pipeline"}
-        </GlassButton>
-        <GlassButton
-          onClick={() => navigate("/secrets")}
-          disabled={
-            !(
-              pipeline.result?.yaml ||
-              (pipeline.result as any)?.generated_yaml ||
-              (pipeline.result as any)?.data?.generated_yaml
-            )
-          }
-          className="rounded-md border px-4 py-2 bg-white"
-        >
-          Continue → Secrets
-        </GlassButton>
+          {result && yaml && (
+            <>
+              {!editing ? (
+                <pre className="mt-2 max-h-96 overflow-auto rounded-md bg-slate-900 text-slate-100 text-xs p-3 font-mono whitespace-pre">
+                  {yaml}
+                </pre>
+              ) : (
+                <textarea
+                  className="mt-2 w-full h-96 rounded-md border border-slate-700 bg-slate-950 text-slate-100 text-xs font-mono p-3 resize-y"
+                  spellCheck={false}
+                  value={editedYaml ?? yaml}
+                  onChange={(e) => setEditedYaml(e.target.value)}
+                />
+              )}
+            </>
+          )}
+        </section>
       </div>
-
-      {/* ====== YAML Preview ====== */}
-      <div>
-        <div className="text-sm font-medium mb-1">YAML Preview</div>
-        <pre className="max-h-96 overflow-auto bg-[#131212ff] text-gray-100 rounded-lg p-3">
-{String(
-  pipeline.result?.yaml ??
-  (pipeline.result as any)?.generated_yaml ??
-  (pipeline.result as any)?.data?.generated_yaml ??
-  "Click Generate Pipeline or use the chat to update & regenerate…"
-)}
-        </pre>
-      </div>
-    </section>
+    </div>
   );
 }
-
-// // client/src/pages/ConfigurePage.tsx
-// import { useEffect, useState } from "react";
-// import { useNavigate } from "react-router-dom";
-// import { useRepoStore } from "../store/useRepoStore";
-// import { usePipelineStore } from "../store/usePipelineStore";
-// import { parseChatForPipeline, summarizeChanges } from "../lib/aiAssist";
-
-// type ChatMsg = { role: "user" | "assistant"; text: string };
-
-// export default function ConfigurePage() {
-//   const { repo, branch } = useRepoStore();
-//   const pipeline = usePipelineStore();
-//   const navigate = useNavigate();
-
-//   useEffect(() => {
-//     if (!repo || !branch) return;
-//     // load AWS roles once
-//     pipeline.loadAwsRoles?.().catch(console.error);
-//   }, [repo, branch, pipeline]);
-
-//   const [busy, setBusy] = useState(false);
-//   const [chatInput, setChatInput] = useState("");
-//   const [chat, setChat] = useState<ChatMsg[]>([
-//     {
-//       role: "assistant",
-//       text:
-//         "Tell me how you want the pipeline. Examples:\n" +
-//         "• Use Node 20 and pnpm\n" +
-//         "• Test with vitest, build with npm run build\n" +
-//         "• Use this AWS role ARN: arn:aws:iam::123456789012:role/app-ci\n" +
-//         "I’ll update the form and regenerate the YAML.",
-//     },
-//   ]);
-
-//   async function regenerateNow() {
-//     if (!repo || !branch) return;
-//     setBusy(true);
-//     try {
-//       await pipeline.regenerate({ repo, branch });
-//     } finally {
-//       setBusy(false);
-//     }
-//   }
-
-//   async function onSendChat(e?: React.FormEvent) {
-//     e?.preventDefault();
-//     const message = chatInput.trim();
-//     if (!message) return;
-
-//     // 1) show user message
-//     setChat((c) => [...c, { role: "user", text: message }]);
-//     setChatInput("");
-
-//     // 2) parse & apply changes to the pipeline store
-//     const changes = parseChatForPipeline(message);
-//     const { options } = usePipelineStore.getState();
-
-//     if (changes.nodeVersion)
-//       pipeline.setOption("nodeVersion", changes.nodeVersion);
-//     if (changes.installCmd) pipeline.setOption("installCmd", changes.installCmd);
-//     if (changes.testCmd) pipeline.setOption("testCmd", changes.testCmd);
-//     if (changes.buildCmd) pipeline.setOption("buildCmd", changes.buildCmd);
-//     if (changes.awsRoleArn) pipeline.setOption("awsRoleArn", changes.awsRoleArn);
-
-//     // 3) regenerate YAML
-//     await regenerateNow();
-
-//     // 4) assistant summary
-//     const summary = summarizeChanges(changes);
-//     setChat((c) => [...c, { role: "assistant", text: summary }]);
-//   }
-
-//   return (
-//     <section className="grid gap-4 p-6 max-w-5xl mx-auto">
-//       <h1 className="text-2xl font-semibold">Configure Pipeline</h1>
-//       <div className="text-sm opacity-70">{repo}@{branch}</div>
-
-//       {/* ====== Template & Stages ====== */}
-//       <label className="space-y-2">
-//         <div className="font-medium">Template</div>
-//         <select
-//           value={pipeline.template}
-//           onChange={(e) => pipeline.setTemplate?.(e.target.value)}
-//           className="block rounded-md border px-3 py-2"
-//         >
-//           <option value="node_app">Node.js</option>
-//           {/* add more when ready */}
-//         </select>
-//       </label>
-
-//       <div>
-//         <div className="font-medium mb-1">Stages</div>
-//         <div className="flex gap-4">
-//           {(["build", "test", "deploy"] as const).map((s) => (
-//             <label key={s} className="flex items-center gap-2">
-//               <input
-//                 type="checkbox"
-//                 checked={pipeline.stages.includes(s)}
-//                 onChange={() => pipeline.toggleStage(s)}
-//               />
-//               {s}
-//             </label>
-//           ))}
-//         </div>
-//       </div>
-
-//       {/* ====== AI Chat Assist ====== */}
-// <div className="grid gap-2">
-//   <div className="text-sm font-medium">
-//     Chat with AI about Node version, install/test/build commands, and AWS role
-//   </div>
-
-//   {/* history */}
-//   <div className="rounded-lg bg-gray-100/60 p-3 max-h-64 overflow-auto">
-//     {chat.map((m, i) => (
-//       <div key={i} className={`my-2 ${m.role === "user" ? "text-right" : ""}`}>
-//         <span
-//           className={`inline-block rounded px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap ${
-//             m.role === "user" ? "bg-black text-white" : "bg-white border"
-//           }`}
-//         >
-//           {m.text}
-//         </span>
-//       </div>
-//     ))}
-//   </div>
-
-//   {/* examples */}
-//   <div className="flex flex-wrap gap-2 text-xs">
-//     {[
-//       "Use Node 20, pnpm; test with vitest; build with pnpm build",
-//       "Node 18; npm ci; npm test; npm run build",
-//       "role arn:aws:iam::123456789012:role/app-ci",
-//     ].map((ex) => (
-//       <button
-//         key={ex}
-//         type="button"
-//         onClick={() => setChatInput(ex)}
-//         className="rounded-full border bg-white px-3 py-1 hover:bg-gray-50"
-//       >
-//         {ex}
-//       </button>
-//     ))}
-//   </div>
-
-//   {/* big input */}
-//   <form onSubmit={onSendChat} className="grid gap-2">
-//     <textarea
-//       value={chatInput}
-//       onChange={(e) => setChatInput(e.target.value)}
-//       placeholder="e.g., Use Node 20 and pnpm. Test with vitest. Build with pnpm build. Role arn:aws:iam::123...:role/ci"
-//       className="rounded-md border px-3 py-2 min-h-[110px] text-[0.95rem]"
-//       onKeyDown={(e) => {
-//         if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-//           onSendChat(e);
-//         }
-//       }}
-//     />
-//     <div className="flex items-center justify-between">
-//       <span className="text-xs opacity-70">Press ⌘/Ctrl + Enter to send</span>
-//       <button
-//         type="submit"
-//         disabled={busy}
-//         className="rounded-md border px-4 py-2 bg-white"
-//       >
-//         {busy ? "…" : "Send"}
-//       </button>
-//     </div>
-//   </form>
-// </div>
-
-
-//       {/* ====== Options (auto-updated by chat) ====== */}
-//       <div className="grid gap-3">
-//         <label className="grid gap-1">
-//           <span className="text-sm font-medium">Node version</span>
-//           <input
-//             value={pipeline.options.nodeVersion}
-//             onChange={(e) => pipeline.setOption("nodeVersion", e.target.value)}
-//             className="rounded-md border px-3 py-2"
-//           />
-//         </label>
-//         <label className="grid gap-1">
-//           <span className="text-sm font-medium">Install command</span>
-//           <input
-//             value={pipeline.options.installCmd}
-//             onChange={(e) => pipeline.setOption("installCmd", e.target.value)}
-//             className="rounded-md border px-3 py-2"
-//           />
-//         </label>
-//         <label className="grid gap-1">
-//           <span className="text-sm font-medium">Test command</span>
-//           <input
-//             value={pipeline.options.testCmd}
-//             onChange={(e) => pipeline.setOption("testCmd", e.target.value)}
-//             className="rounded-md border px-3 py-2"
-//           />
-//         </label>
-//         <label className="grid gap-1">
-//           <span className="text-sm font-medium">Build command</span>
-//           <input
-//             value={pipeline.options.buildCmd}
-//             onChange={(e) => pipeline.setOption("buildCmd", e.target.value)}
-//             className="rounded-md border px-3 py-2"
-//           />
-//         </label>
-//       </div>
-
-//       {/* ====== AWS Role ====== */}
-//       <label className="grid gap-1">
-//         <span className="text-sm font-medium">AWS Role (OIDC)</span>
-//         <select
-//           disabled={busy}
-//           value={pipeline.options.awsRoleArn ?? ""}
-//           onChange={(e) => pipeline.setOption("awsRoleArn", e.target.value)}
-//           className="rounded-md border px-3 py-2"
-//         >
-//           <option value="">-- select --</option>
-//           {pipeline.roles?.map((r) => (
-//             <option key={r.arn} value={r.arn}>{r.name}</option>
-//           ))}
-//         </select>
-//       </label>
-
-//       {/* ====== Actions ====== */}
-//       <div className="flex gap-3">
-//         <button onClick={regenerateNow} disabled={busy} className="rounded-md border px-4 py-2 bg-white">
-//           {busy ? "Generating…" : "Generate Pipeline"}
-//         </button>
-//         <button
-//           onClick={() => navigate("/secrets")}
-//           disabled={
-//             !(
-//               pipeline.result?.yaml ||
-//               pipeline.result?.generated_yaml ||
-//               pipeline.result?.data?.generated_yaml
-//             )
-//           }
-//           className="rounded-md border px-4 py-2 bg-white"
-//         >
-//           Continue → Secrets
-//         </button>
-//       </div>
-
-//       {/* ====== YAML Preview ====== */}
-//       <div>
-//         <div className="text-sm font-medium mb-1">YAML Preview</div>
-//         <pre className="max-h-96 overflow-auto bg-[#131212ff] text-gray-100 rounded-lg p-3">
-// {pipeline.result?.yaml ?? pipeline.result?.generated_yaml ?? "Click Generate Pipeline or use the chat to update & regenerate…"}
-//         </pre>
-//       </div>
-//     </section>
-//   );
-// }
