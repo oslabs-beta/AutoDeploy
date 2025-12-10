@@ -1,14 +1,17 @@
-import { GlassButton } from "../components/ui/GlassButton";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
+import { GlassButton } from '../components/ui/GlassButton';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectTrigger,
   SelectValue,
   SelectContent,
   SelectItem,
-} from "@/components/ui/select";
-import { useRepoStore } from "@/store/useRepoStore";
+} from '@/components/ui/select';
+import { useRepoStore } from '@/store/useRepoStore';
+
+// Added by Lorenc
+import { startGitHubOAuth } from '@/lib/api';
 
 export default function ConnectPage() {
   const {
@@ -24,7 +27,11 @@ export default function ConnectPage() {
 
   const handleGithubConnect = () => {
     // Vite proxy sends this to backend http://localhost:3001/auth/github
-    window.location.href = "http://localhost:3000/auth/github/start";
+    // window.location.href = "http://localhost:3000/auth/github/start";
+
+    // After GitHub completes, the server redirects back here.
+    const redirectTo = window.location.origin + '/connect';
+    startGitHubOAuth(redirectTo);
   };
 
   return (
@@ -49,7 +56,7 @@ export default function ConnectPage() {
               variant="secondary"
               className="bg-white/20 hover:bg-white/30 text-white"
               onClick={() => {
-                console.log("[Page] Re-sync clicked");
+                console.log('[Page] Re-sync clicked');
                 loadRepos();
               }}
             >
@@ -62,9 +69,9 @@ export default function ConnectPage() {
           <div className="grid gap-2">
             <Label className="text-white/80">Repository</Label>
             <Select
-              value={repo ?? ""}
+              value={repo ?? ''}
               onValueChange={(v) => {
-                console.log("[Page] Repo selected:", v);
+                console.log('[Page] Repo selected:', v);
                 setRepo(v);
                 loadBranches(v);
               }}
@@ -85,13 +92,13 @@ export default function ConnectPage() {
           <div className="grid gap-2">
             <Label className="text-white/80">Branch</Label>
             <Select
-              value={branch ?? ""}
+              value={branch ?? ''}
               onValueChange={setBranch}
               disabled={!repo}
             >
               <SelectTrigger className="bg-white/10 border-white/20 text-white disabled:opacity-50">
                 <SelectValue
-                  placeholder={repo ? "Select a branch" : "Pick a repo first"}
+                  placeholder={repo ? 'Select a branch' : 'Pick a repo first'}
                 />
               </SelectTrigger>
               <SelectContent className="bg-slate-900 text-white border-white/20">
@@ -109,7 +116,7 @@ export default function ConnectPage() {
           <GlassButton
             className="bg-white/20 hover:bg-white/30 text-white"
             disabled={!repo || !branch}
-            onClick={() => location.assign("/configure")}
+            onClick={() => location.assign('/configure')}
           >
             Continue → Configure
           </GlassButton>
@@ -118,7 +125,6 @@ export default function ConnectPage() {
     </div>
   );
 }
-
 
 // import { GlassButton } from "../components/ui/GlassButton";
 // import { Button } from "@/components/ui/button";
