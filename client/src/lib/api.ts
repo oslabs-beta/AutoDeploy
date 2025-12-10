@@ -1,6 +1,7 @@
 import { usePipelineStore } from '../store/usePipelineStore';
 
-// This block of code was commented out from Lorenc. Connecting the GCP backed URL with the frontend
+// This block of code was commented out by Lorenc.
+// Connecting the GCP backed URL with the frontend
 
 // export const BASE =
 //   import.meta.env.VITE_API_BASE ?? 'http://localhost:3000/api';

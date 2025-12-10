@@ -23,6 +23,8 @@ const {
 const FRONTEND_URL =
   process.env.FRONTEND_URL || 'http://localhost:5173/connect';
 
+const isProd = process.env.NODE_ENV === 'production';
+
 if (!GITHUB_CLIENT_ID || !GITHUB_CLIENT_SECRET || !GITHUB_OAUTH_REDIRECT_URI) {
   console.warn('[WARN] Missing GitHub OAuth env vars');
 }
@@ -72,6 +74,21 @@ router.get('/callback', async (req, res) => {
       });
       return res.status(400).send('Invalid OAuth state');
     }
+
+    // Log the redirect URI used (helps catch mismatches)
+    // console.log(
+    //   '[OAuth callback] Using redirectUri:',
+    //   GITHUB_OAUTH_REDIRECT_URI
+    // );
+
+    // Recover original redirect target (if any) from state
+    const stateItem = consumeState(String(state));
+    const redirectTarget =
+      stateItem &&
+      typeof stateItem.redirectTo === 'string' &&
+      stateItem.redirectTo
+        ? stateItem.redirectTo
+        : FRONTEND_URL;
 
     // Log the redirect URI used (helps catch mismatches)
     console.log(
@@ -153,16 +170,27 @@ router.get('/callback', async (req, res) => {
     }
     const jwtToken = jwt.sign(jwtPayload, JWT_SECRET, { expiresIn: '10h' });
 
+    // res.clearCookie('oauth_state');
+    // res.cookie('mcp_session', jwtToken, {
+    //   httpOnly: true,
+    //   sameSite: 'lax',
+    //   path: '/',
+    //   maxAge: 10 * 60 * 60 * 1000, // 10h
+    //   // secure: true, // enable on HTTPS
+    // });
+
+    // return res.redirect(FRONTEND_URL);
+
     res.clearCookie('oauth_state');
     res.cookie('mcp_session', jwtToken, {
       httpOnly: true,
-      sameSite: 'lax',
+      sameSite: isProd ? 'none' : 'lax',
+      secure: isProd,
       path: '/',
       maxAge: 10 * 60 * 60 * 1000, // 10h
-      // secure: true, // enable on HTTPS
     });
 
-    return res.redirect(FRONTEND_URL);
+    return res.redirect(redirectTarget);
   } catch (e) {
     console.error('[OAuth callback] error:', e);
     return res.status(500).send(`OAuth failed: ${e.message}`);
