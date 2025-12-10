@@ -1,12 +1,19 @@
 // src/App.tsx
-import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from "react-router-dom";
-import ConnectPage from "./pages/ConnectPage";
-import ConfigurePage from "./pages/ConfigurePage";
-import SecretsPage from "./pages/SecretsPage";
-import DashboardPage from "./pages/DashboardPage";
-import Jenkins from "./routes/Jenkins";
-import { useRepoStore } from "./store/useRepoStore";
-import { usePipelineStore } from "./store/usePipelineStore";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Navigate,
+  Link,
+  useLocation,
+} from 'react-router-dom';
+import ConnectPage from './pages/ConnectPage';
+import ConfigurePage from './pages/ConfigurePage';
+import SecretsPage from './pages/SecretsPage';
+import DashboardPage from './pages/DashboardPage';
+import Jenkins from './routes/Jenkins';
+import { useRepoStore } from './store/useRepoStore';
+import { usePipelineStore } from './store/usePipelineStore';
 
 function NeedRepo({ children }: { children: JSX.Element }) {
   const { repo, branch } = useRepoStore();
@@ -14,7 +21,8 @@ function NeedRepo({ children }: { children: JSX.Element }) {
 }
 function NeedPipeline({ children }: { children: JSX.Element }) {
   const { result } = usePipelineStore();
-  const hasYaml = result?.generated_yaml || result?.yaml || result?.data?.generated_yaml;
+  const hasYaml =
+    result?.generated_yaml || result?.yaml || result?.data?.generated_yaml;
   return !hasYaml ? <Navigate to="/configure" replace /> : children;
 }
 
@@ -26,10 +34,8 @@ function NavLink({ to, children }: { to: string; children: React.ReactNode }) {
     <Link
       to={to}
       className={
-        "transition-colors " +
-        (active
-          ? "text-white"
-          : "text-slate-200/80 hover:text-white")
+        'transition-colors ' +
+        (active ? 'text-white' : 'text-slate-200/80 hover:text-white')
       }
     >
       {children}
