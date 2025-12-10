@@ -22,9 +22,13 @@ function getClient() {
 /** --------------------------------------------------
  * Helper: Call MCP tool
  * -------------------------------------------------- */
+const MCP_BASE_URL =
+  process.env.MCP_BASE_URL?.replace(/\/$/, "") ||
+  "http://localhost:3000/mcp/v1";
+
 async function callMCPTool(tool, input, cookie) {
   try {
-    const response = await fetch(`http://localhost:3000/mcp/v1/${tool}`, {
+    const response = await fetch(`${MCP_BASE_URL}/${tool}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
