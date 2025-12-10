@@ -59,13 +59,7 @@ export const api = {
 
   async createPipeline(payload: any) {
     const { repo, branch, template = "node_app", options } = payload || {};
-    const data = await mcp("pipeline_generator", {
-      repo,
-      branch,
-      provider: "aws",
-      template,
-      options: options || {},
-    });
+    const data = await mcp("pipeline_generator", payload);
     return data;
   },
 

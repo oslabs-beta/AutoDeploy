@@ -27,7 +27,8 @@ export default function ConfigurePage() {
   useEffect(() => {
     if (!repo || !branch) return;
     pipeline.loadAwsRoles?.().catch(console.error);
-  }, [repo, branch, pipeline]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function regenerateNow() {
     if (!repo || !branch) return;
@@ -74,6 +75,18 @@ export default function ConfigurePage() {
         </div>
       </div>
 
+      {/* Provider */}
+      <label className="space-y-2">
+        <div className="font-medium">Provider</div>
+        <select
+          value={pipeline.provider}
+          onChange={(e) => pipeline.setProvider?.(e.target.value as "aws" | "jenkins")}
+          className="block rounded-md border px-3 py-2"
+        >
+          <option value="aws">AWS (OIDC)</option>
+          <option value="jenkins">Jenkins</option>
+        </select>
+      </label>
       {/* Template */}
       <label className="space-y-2">
         <div className="font-medium">Template</div>
@@ -182,59 +195,63 @@ export default function ConfigurePage() {
         </form>
       </div>
 
-      {/* ====== Options (auto-updated by chat) ====== */}
-      <div className="grid gap-3">
-        <label className="grid gap-1">
-          <span className="text-sm font-medium">Node version</span>
-          <input
-            value={pipeline.options?.nodeVersion ?? ""}
-            onChange={(e) => pipeline.setOption?.("nodeVersion", e.target.value)}
-            className="rounded-md border px-3 py-2"
-          />
-        </label>
-        <label className="grid gap-1">
-          <span className="text-sm font-medium">Install command</span>
-          <input
-            value={pipeline.options?.installCmd ?? ""}
-            onChange={(e) => pipeline.setOption?.("installCmd", e.target.value)}
-            className="rounded-md border px-3 py-2"
-          />
-        </label>
-        <label className="grid gap-1">
-          <span className="text-sm font-medium">Test command</span>
-          <input
-            value={pipeline.options?.testCmd ?? ""}
-            onChange={(e) => pipeline.setOption?.("testCmd", e.target.value)}
-            className="rounded-md border px-3 py-2"
-          />
-        </label>
-        <label className="grid gap-1">
-          <span className="text-sm font-medium">Build command</span>
-          <input
-            value={pipeline.options?.buildCmd ?? ""}
-            onChange={(e) => pipeline.setOption?.("buildCmd", e.target.value)}
-            className="rounded-md border px-3 py-2"
-          />
-        </label>
-      </div>
+      {pipeline.provider === "aws" && (
+        <>
+        {/* ====== Options (auto-updated by chat) ====== */}
+        <div className="grid gap-3">
+          <label className="grid gap-1">
+            <span className="text-sm font-medium">Node version</span>
+            <input
+              value={pipeline.options?.nodeVersion ?? ""}
+              onChange={(e) => pipeline.setOption?.("nodeVersion", e.target.value)}
+              className="rounded-md border px-3 py-2"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-medium">Install command</span>
+            <input
+              value={pipeline.options?.installCmd ?? ""}
+              onChange={(e) => pipeline.setOption?.("installCmd", e.target.value)}
+              className="rounded-md border px-3 py-2"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-medium">Test command</span>
+            <input
+              value={pipeline.options?.testCmd ?? ""}
+              onChange={(e) => pipeline.setOption?.("testCmd", e.target.value)}
+              className="rounded-md border px-3 py-2"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-medium">Build command</span>
+            <input
+              value={pipeline.options?.buildCmd ?? ""}
+              onChange={(e) => pipeline.setOption?.("buildCmd", e.target.value)}
+              className="rounded-md border px-3 py-2"
+            />
+          </label>
+        </div>
 
-      {/* ====== AWS Role ====== */}
-      <label className="grid gap-1">
-        <span className="text-sm font-medium">AWS Role (OIDC)</span>
-        <select
-          disabled={busy}
-          value={pipeline.options?.awsRoleArn ?? ""}
-          onChange={(e) => pipeline.setOption?.("awsRoleArn", e.target.value)}
-          className="rounded-md border px-3 py-2 text-white bg-black"
-        >
-          <option value="">-- select --</option>
-          {pipeline.roles?.map((r: any) => (
-            <option key={r.arn} value={r.arn}>
-              {r.name}
-            </option>
-          ))}
-        </select>
-      </label>
+        {/* ====== AWS Role ====== */}
+        <label className="grid gap-1">
+          <span className="text-sm font-medium">AWS Role (OIDC)</span>
+          <select
+            disabled={busy}
+            value={pipeline.options?.awsRoleArn ?? ""}
+            onChange={(e) => pipeline.setOption?.("awsRoleArn", e.target.value)}
+            className="rounded-md border px-3 py-2 text-white bg-black"
+          >
+            <option value="">-- select --</option>
+            {pipeline.roles?.map((r: any) => (
+              <option key={r.arn} value={r.arn}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        </>
+      )}
 
       {/* ====== Actions ====== */}
       <div className="flex gap-3">

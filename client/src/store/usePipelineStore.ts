@@ -15,6 +15,7 @@ type PipelineState = {
     buildCmd: string;
     awsRoleArn?: string;
   };
+  provider: "aws" | "jenkins";
 
   // outputs from MCP
   result?: McpPipeline;
@@ -30,6 +31,7 @@ type PipelineState = {
 
 type PipelineActions = {
   setTemplate(t: string): void;
+  setProvider(p: "aws" | "jenkins"): void;
   toggleStage(s: Stage): void;
   setOption<K extends keyof PipelineState["options"]>(k: K, v: PipelineState["options"][K]): void;
 
@@ -52,6 +54,7 @@ const initial: PipelineState = {
     testCmd: "npm test",
     buildCmd: "npm run build",
   },
+  provider: "aws",
   roles: [],
   editing: false,
   status: "idle",
@@ -61,6 +64,7 @@ export const usePipelineStore = create<PipelineState & PipelineActions>()((set, 
   ...initial,
 
   setTemplate: (t) => set({ template: t }),
+  setProvider: (p) => set({ provider: p }),
   toggleStage: (s) => {
     const cur = get().stages;
     set({ stages: cur.includes(s) ? cur.filter(x => x !== s) : [...cur, s] });
@@ -103,13 +107,19 @@ export const usePipelineStore = create<PipelineState & PipelineActions>()((set, 
   async regenerate({ repo, branch }) {
     set({ status: "loading", error: undefined });
     try {
-      const { template, stages, options } = get();
+      const { template, stages, options, provider } = get();
       const res = await api.createPipeline({
         repo,
         branch,
         service: "ci-cd-generator",
+        provider,
         template,
-        options: { ...options, stages },
+        node_version: options.nodeVersion,
+        install_command: options.installCmd,
+        test_command: options.testCmd,
+        build_command: options.buildCmd,
+        aws_role_arn: options.awsRoleArn,
+        stages,
       });
 
       const generated_yaml =
