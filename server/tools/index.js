@@ -1,6 +1,6 @@
 // Central registry for all MCP tools
 import { repo_reader } from "./repo_reader.js";
-import { pipeline_generator } from "./pipeline_generator.js";
+import { pipeline_generator } from "./pipeline_generator.old.js";
 import { oidc_adapter } from "./oidc_adapter.js";
 import { github_adapter } from "./github_adapter.js";
 

@@ -22,18 +22,27 @@ type PipelineState = {
   repoFullName?: string;
 
   // local UI state
-  roles: { name: string; arn: string }[];                 
+  roles: { name: string; arn: string }[];
   editing: boolean;
   editedYaml?: string;
   status: "idle" | "loading" | "success" | "error";
   error?: string;
+
+  // Have we already loaded roles this session?
+  rolesLoaded: boolean;
+
+  // Derived getter to surface the currently effective YAML
+  getEffectiveYaml: () => string | undefined;
 };
 
 type PipelineActions = {
   setTemplate(t: string): void;
   setProvider(p: "aws" | "jenkins"): void;
   toggleStage(s: Stage): void;
-  setOption<K extends keyof PipelineState["options"]>(k: K, v: PipelineState["options"][K]): void;
+  setOption<K extends keyof PipelineState["options"]>(
+    k: K,
+    v: PipelineState["options"][K]
+  ): void;
 
   loadAwsRoles(): Promise<void>;
   regenerate(payload: { repo: string; branch: string }): Promise<void>;
@@ -58,114 +67,162 @@ const initial: PipelineState = {
   roles: [],
   editing: false,
   status: "idle",
+  error: undefined,
+  rolesLoaded: false, // guards MCP calls
+  getEffectiveYaml: () => undefined,
 };
 
-export const usePipelineStore = create<PipelineState & PipelineActions>()((set, get) => ({
-  ...initial,
+export const usePipelineStore = create<PipelineState & PipelineActions>()(
+  (set, get) => ({
+    ...initial,
 
-  setTemplate: (t) => set({ template: t }),
-  setProvider: (p) => set({ provider: p }),
-  toggleStage: (s) => {
-    const cur = get().stages;
-    set({ stages: cur.includes(s) ? cur.filter(x => x !== s) : [...cur, s] });
-  },
-  setOption: (k, v) => set({ options: { ...get().options, [k]: v } }),
+    setTemplate: (t) => set({ template: t }),
 
-  async loadAwsRoles() {
-    try {
-      const res = await api.listAwsRoles();
+    toggleStage: (s) => {
+      const cur = get().stages;
+      set({
+        stages: cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s],
+      });
+    },
 
-      // Normalize both fetch-style and axios-style responses
-      const payload = res?.data ?? res; // if axios -> res.data, if fetch -> res
-      // Roles can live at payload.data.roles or payload.roles depending on server/helper
-      const roles =
-        payload?.data?.roles ??
-        payload?.roles ??
-        payload?.data?.data?.roles ??
-        [];
+    setOption: (k, v) =>
+      set({
+        options: {
+          ...get().options,
+          [k]: v,
+        },
+      }),
 
-      console.log("[usePipelineStore] Raw roles payload:", payload);
-      console.log("[usePipelineStore] Loaded roles (final):", roles);
+    // ============================
+    //   AWS ROLES LOADER (GUARDED)
+    // ============================
+    async loadAwsRoles() {
+      const { rolesLoaded } = get();
 
-      // Normalize to objects even if backend returned strings
-      const normalizedRoles = roles.map((r: any) =>
-        typeof r === "string" ? { name: r.split("/").pop(), arn: r } : r
-      );
-
-      set({ roles: normalizedRoles });
-
-      const { options } = get();
-      if (!options.awsRoleArn && normalizedRoles[0]) {
-        set({ options: { ...options, awsRoleArn: normalizedRoles[0].arn } });
+      // hard guard: if we already loaded roles successfully once,
+      // never hit the backend again this session.
+      if (rolesLoaded) {
+        console.log(
+          "[usePipelineStore] Skipping loadAwsRoles - roles already loaded"
+        );
+        return;
       }
-    } catch (err) {
-      console.error("[usePipelineStore] Failed to load AWS roles:", err);
-      set({ roles: [] });
-    }
-  },
 
-  async regenerate({ repo, branch }) {
-    set({ status: "loading", error: undefined });
-    try {
-      const { template, stages, options, provider } = get();
-      const res = await api.createPipeline({
+      console.log("[usePipelineStore] Fetching AWS roles from MCP…");
+
+      try {
+        const res = await api.listAwsRoles();
+
+        // `api.listAwsRoles` already normalizes most shapes; treat it as `{ roles: string[] }`
+        const rawRoles = (res as any)?.roles ?? [];
+
+        console.log(
+          "[usePipelineStore] Raw roles from api.listAwsRoles:",
+          rawRoles
+        );
+
+        const normalizedRoles = (rawRoles as any[]).map((r: any) =>
+          typeof r === "string"
+            ? { name: r.split("/").pop() ?? r, arn: r }
+            : r
+        );
+
+        set({
+          roles: normalizedRoles,
+          rolesLoaded: true, //  this is what stops future calls
+        });
+
+        const { options } = get();
+        if (!options.awsRoleArn && normalizedRoles[0]) {
+          set({
+            options: { ...options, awsRoleArn: normalizedRoles[0].arn },
+          });
+        }
+
+        console.log(
+          "[usePipelineStore] Loaded roles (normalized):",
+          normalizedRoles
+        );
+      } catch (err) {
+        console.error("[usePipelineStore] Failed to load AWS roles:", err);
+        // allow retry later if needed
+        set({ roles: [], rolesLoaded: false });
+      }
+    },
+
+    // ============================
+    //    PIPELINE GENERATION
+    // ============================
+    async regenerate({ repo, branch }) {
+      set({ status: "loading", error: undefined });
+      try {
+        const { template, stages, options } = get();
+        const res = await api.createPipeline({
+          repo,
+          branch,
+          service: "ci-cd-generator",
+          template,
+          options: { ...options, stages },
+        });
+
+        const generated_yaml =
+          (res as any)?.data?.data?.generated_yaml ||
+          (res as any)?.data?.generated_yaml ||
+          (res as any)?.generated_yaml ||
+          "";
+
+        const repoFullName =
+          (res as any)?.data?.data?.repo || (res as any)?.data?.repo || "";
+
+        console.log(
+          "[usePipelineStore] Captured repoFullName:",
+          repoFullName
+        );
+
+        set({
+          result: { ...(res as any), yaml: generated_yaml, generated_yaml },
+          repoFullName,
+          status: "success",
+          editing: false,
+          editedYaml: undefined,
+        });
+
+        console.log(
+          "[usePipelineStore] YAML generated:",
+          generated_yaml.slice(0, 80)
+        );
+      } catch (e: any) {
+        console.error("[usePipelineStore] regenerate error:", e);
+        set({ status: "error", error: e.message });
+      }
+    },
+
+    async openPr({ repo, branch }) {
+      const r = get().result;
+      const yaml = get().editedYaml ?? r?.generated_yaml;
+      const file = (r as any)?.pipeline_name || "ci.yml";
+
+      if (!yaml) throw new Error("No YAML to open PR with");
+
+      await api.openPr({
         repo,
         branch,
-        service: "ci-cd-generator",
-        provider,
-        template,
-        node_version: options.nodeVersion,
-        install_command: options.installCmd,
-        test_command: options.testCmd,
-        build_command: options.buildCmd,
-        aws_role_arn: options.awsRoleArn,
-        stages,
+        path: `.github/workflows/${file}`,
+        yaml,
+        title: "Add CI pipeline",
       });
+    },
 
-      const generated_yaml =
-        res?.data?.data?.generated_yaml ||
-        res?.data?.generated_yaml ||
-        res?.generated_yaml ||
-        "";
+    setEditing: (b) => set({ editing: b }),
+    setEditedYaml: (y) => set({ editedYaml: y }),
+    resetYaml: () => set({ editedYaml: undefined }),
 
-      const repoFullName =
-        res?.data?.data?.repo ||
-        res?.data?.repo ||
-        "";
+    // Derived getter used by ConfigurePage
+    getEffectiveYaml: () => {
+      const { editedYaml, result } = get();
+      return editedYaml ?? result?.generated_yaml ?? result?.yaml;
+    },
 
-      console.log("[usePipelineStore] Captured repoFullName:", repoFullName);
-
-      set({
-        result: { ...res, yaml: generated_yaml, generated_yaml },
-        repoFullName,
-        status: "success",
-        editing: false,
-        editedYaml: undefined,
-      });
-
-      console.log("[usePipelineStore] YAML generated:", generated_yaml.slice(0, 80));
-    } catch (e: any) {
-      console.error("[usePipelineStore] regenerate error:", e);
-      set({ status: "error", error: e.message });
-    }
-  },
-
-  async openPr({ repo, branch }) {
-    const r = get().result;
-    const yaml = get().editedYaml ?? r?.generated_yaml;
-    const file = r?.pipeline_name || "ci.yml";
-    if (!yaml) throw new Error("No YAML to open PR with");
-    await api.openPr({
-      repo,
-      branch,
-      path: `.github/workflows/${file}`,
-      yaml,
-      title: "Add CI pipeline",
-    });
-  },
-
-  setEditing: (b) => set({ editing: b }),
-  setEditedYaml: (y) => set({ editedYaml: y }),
-  resetYaml: () => set({ editedYaml: undefined }),
-  resetAll: () => set(initial),
-}));
+    resetAll: () => set(initial),
+  })
+);

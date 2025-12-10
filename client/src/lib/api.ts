@@ -6,6 +6,7 @@ export const BASE =
 // Derive the server base without any trailing "/api" for MCP calls
 const SERVER_BASE = BASE.replace(/\/api$/, "");
 
+// Generic REST helper for /api/* endpoints
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
@@ -18,43 +19,206 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
 }
 
 // Helper for MCP tool calls on the server at /mcp/v1/:tool_name
-async function mcp<T>(tool: string, input: Record<string, any> = {}): Promise<T> {
-  const res = await fetch(`${SERVER_BASE}/mcp/v1/${encodeURIComponent(tool)}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify(input),
-  });
+async function mcp<T>(
+  tool: string,
+  input: Record<string, any> = {}
+): Promise<T> {
+  const res = await fetch(
+    `${SERVER_BASE}/mcp/v1/${encodeURIComponent(tool)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(input),
+    }
+  );
   const payload = await res.json().catch(() => ({}));
-  if (!res.ok || payload?.success === false) {
-    const msg = payload?.error || res.statusText || "MCP error";
+  if (!res.ok || (payload as any)?.success === false) {
+    const msg = (payload as any)?.error || res.statusText || "MCP error";
     throw new Error(msg);
   }
-  return payload.data as T;
+  // payload = { success: true, data: {...} }
+  return (payload as any).data as T;
 }
 
-export const api = {
-  // ✅ method syntax (preferred)
-  async listRepos(): Promise<{ repos: string[] }> {
-    const outer = await mcp<{
-      success: boolean;
-      data: { provider: string; user: string; repositories: { full_name: string }[] };
-    }>("repo_reader", {});
+// Simple in-memory cache for AWS roles to avoid hammering MCP
+let cachedAwsRoles: string[] | null = null;
+let awsRolesAttempted = false;
 
-    const inner = outer?.data;
-    const repos = inner?.repositories?.map(r => r.full_name) ?? [];
-    return { repos };
+let cachedRepos: string[] | null = null;
+
+const cachedBranches = new Map<string, string[]>();
+
+export const api = {
+
+  async listAwsRoles(): Promise<{ roles: string[] }> {
+    // If we've already successfully fetched roles, reuse them.
+    if (cachedAwsRoles && cachedAwsRoles.length > 0) {
+      return { roles: cachedAwsRoles };
+    }
+
+    // If we've already *tried* once (and it failed), don't hammer the server.
+    if (awsRolesAttempted) {
+      return { roles: [] };
+    }
+
+    awsRolesAttempted = true;
+
+    try {
+      const data = await mcp<{ roles?: { name: string; arn: string }[] }>(
+        "oidc_adapter",
+        { provider: "aws" }
+      );
+
+      const roles = (data.roles ?? []).map((r) => r.arn);
+      cachedAwsRoles = roles;
+      return { roles };
+    } catch (err) {
+      console.error("[api.listAwsRoles] failed:", err);
+      // Don't throw again to avoid retry loops; just return empty.
+      return { roles: [] };
+    }
+  },
+
+
+  // AI wizard – talks to /agent/wizard on the backend
+  askYamlWizard: async (input: {
+    repoUrl: string;
+    provider: string;
+    branch: string;
+    message?: string;
+    yaml?: string;
+  }) => {
+    const res = await fetch(`${SERVER_BASE}/agent/wizard`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(input),
+    });
+
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok || (payload as any)?.success === false) {
+      throw new Error(
+        (payload as any)?.error || res.statusText || "Agent error"
+      );
+    }
+
+    // whatever runWizardAgent returns is in payload.data
+    return (payload as any).data;
+  },
+
+  // ===== MCP helpers for repos / branches / pipeline generation =====
+  async listRepos(): Promise<{ repos: string[] }> {
+    if (cachedRepos && cachedRepos.length > 0) return { repos: cachedRepos };
+
+    try {
+      const outer = await mcp<{
+        success?: boolean;
+        data?: { repositories: { full_name: string }[] };
+        repositories?: { full_name: string }[];
+      }>("repo_reader", {});
+
+      const body = (outer as any)?.data ?? outer; // unwrap tool payload
+      const repos = body?.repositories?.map((r: any) => r.full_name) ?? [];
+      cachedRepos = repos;
+      return { repos };
+    } catch (err) {
+      console.error("[api.listRepos] failed:", err);
+      // allow retry on next call if this failed
+      cachedRepos = null;
+      return { repos: [] };
+    }
   },
 
   async listBranches(repo: string): Promise<{ branches: string[] }> {
-    const outer = await mcp<{
-      success: boolean;
-      data: { provider: string; user: string; repositories: { full_name: string; branches?: string[] }[] };
-    }>("repo_reader", {});
+    const cached = cachedBranches.get(repo);
+    if (cached) return { branches: cached };
 
-    const inner = outer?.data;
-    const match = inner?.repositories?.find(r => r.full_name === repo);
-    return { branches: match?.branches ?? [] };
+    try {
+      const outer = await mcp<{
+        success?: boolean;
+        data?: { repositories: { full_name: string; branches?: string[] }[] };
+        repositories?: { full_name: string; branches?: string[] }[];
+      }>("repo_reader", { repoFullName: repo });
+
+      const body = (outer as any)?.data ?? outer;
+      const match = body?.repositories?.find((r: any) => r.full_name === repo);
+      const branches = match?.branches ?? [];
+      cachedBranches.set(repo, branches);
+      return { branches };
+    } catch (err) {
+      console.error("[api.listBranches] failed:", err);
+      return { branches: cachedBranches.get(repo) ?? [] };
+    }
+  },
+//  async listRepos(): Promise<{ repos: string[] }> {
+//     //  If we already have repos cached, reuse them.
+//     if (cachedRepos && cachedRepos.length > 0) {
+//       return { repos: cachedRepos };
+//     }
+
+//     //  If we've already tried once and failed, don't hammer the server.
+//     if (reposAttempted && !cachedRepos) {
+//       return { repos: [] };
+//     }
+
+//     reposAttempted = true;
+
+//     try {
+//       const outer = await mcp<{
+//         provider: string;
+//         user: string;
+//         repositories: { full_name: string }[];
+//       }>("repo_reader", {});
+
+//       const repos = outer?.repositories?.map((r) => r.full_name) ?? [];
+//       cachedRepos = repos;
+//       return { repos };
+//     } catch (err) {
+//       console.error("[api.listRepos] failed:", err);
+//       // Don't throw to avoid retry loops from effects; just return whatever we have (or empty).
+//       return { repos: cachedRepos ?? [] };
+//     }
+//   },
+
+    async listBranches(repo: string): Promise<{ branches: string[] }> {
+    // ✅ If we already have branches cached for this repo, reuse them.
+    const cached = cachedBranches.get(repo);
+    if (cached) {
+      return { branches: cached };
+    }
+
+    try {
+      // For now we still use repo_reader, but we only call it
+      // when the cache is cold. We can later swap this to a
+      // more specific MCP tool like "repo_branches".
+      const outer = await mcp<{
+        success?: boolean;
+        data?: { repositories: { full_name: string; branches?: string[] }[] };
+        repositories?: { full_name: string; branches?: string[] }[];
+      }>("repo_reader", {
+        // This extra input is safe: current server ignores it,
+        // future server can use it to optimize.
+        repoFullName: repo,
+      });
+
+      // Unwrap the payload (tool responses come back as { success, data })
+      const body = (outer as any)?.data ?? outer;
+
+      const match = body?.repositories?.find((r: any) => r.full_name === repo);
+      const branches = match?.branches ?? [];
+
+      // Cache even empty arrays so we don't re-query a repo with no branches
+      cachedBranches.set(repo, branches);
+
+      return { branches };
+    } catch (err) {
+      console.error("[api.listBranches] failed:", err);
+
+      // If we have anything cached (even empty), use it.
+      const fallback = cachedBranches.get(repo) ?? [];
+      return { branches: fallback };
+    }
   },
 
   async createPipeline(payload: any) {
@@ -63,48 +227,88 @@ export const api = {
     return data;
   },
 
-  async listAwsRoles(): Promise<{ roles: string[] }> {
-    const data = await mcp<{ roles?: { name: string; arn: string }[] }>(
-      "oidc_adapter",
-      { provider: "aws" }
-    );
-    return { roles: (data.roles ?? []).map(r => r.arn) };
-  },
+  // ===== OIDC roles (AWS) with caching =====
+
+  // async listAwsRoles(): Promise<{ roles: string[] }> {
+  //   if (cachedAwsRoles && cachedAwsRoles.length > 0) {
+  //     console.log("[api.listAwsRoles] Using cached roles:", cachedAwsRoles);
+  //     return { roles: cachedAwsRoles };
+  //   }
+
+  //   console.log(
+  //     "[api.listAwsRoles] Fetching roles from MCP oidc_adapter (server)..."
+  //   );
+
+  //   const data = await mcp<{ roles?: { name: string; arn: string }[] }>(
+  //     "oidc_adapter",
+  //     { provider: "aws" }
+  //   );
+
+  //   const roles = (data.roles ?? []).map((r) => r.arn);
+  //   cachedAwsRoles = roles;
+
+  //   console.log("[api.listAwsRoles] Cached roles:", cachedAwsRoles);
+
+  //   return { roles };
+  // },
 
   async openPr(_payload: any) {
     throw new Error("openPr is not implemented on the server (no MCP tool)");
   },
 
-  // ... keep the rest of your existing methods like getConnections, getSecretPresence, etc.
-
-
-
   // --- Mocked config/secrets endpoints for Secrets/Preflight flow ---
-  async getConnections(_repo: string): Promise<{
+  async getConnections(
+    _repo: string
+  ): Promise<{
     githubAppInstalled: boolean;
     githubRepoWriteOk: boolean;
-    awsOidc: { connected: boolean; roleArn?: string; accountId?: string; region?: string };
+    awsOidc: {
+      connected: boolean;
+      roleArn?: string;
+      accountId?: string;
+      region?: string;
+    };
   }> {
     // Try to fetch roles to populate a default role ARN
     let roleArn: string | undefined;
     try {
       const { roles } = await this.listAwsRoles();
       roleArn = roles[0];
-    } catch {}
+    } catch (e) {
+      console.warn("[api.getConnections] Failed to load roles:", e);
+    }
     return {
       githubAppInstalled: true,
       githubRepoWriteOk: true,
-      awsOidc: { connected: !!roleArn, roleArn, accountId: "123456789012", region: "us-east-1" },
+      awsOidc: {
+        connected: !!roleArn,
+        roleArn,
+        accountId: "123456789012",
+        region: "us-east-1",
+      },
     };
   },
 
-  async getSecretPresence(repo: string, env: string): Promise<{ key: string; present: boolean }[]> {
+  async getSecretPresence(
+    repo: string,
+    env: string
+  ): Promise<{ key: string; present: boolean }[]> {
     const required = ["GITHUB_TOKEN", "AWS_ROLE_ARN"];
     const store = readSecrets(repo, env);
     return required.map((k) => ({ key: k, present: !!store[k] }));
   },
 
-  async setSecret({ repo, env, key, value }: { repo: string; env: string; key: string; value: string }) {
+  async setSecret({
+    repo,
+    env,
+    key,
+    value,
+  }: {
+    repo: string;
+    env: string;
+    key: string;
+    value: string;
+  }) {
     const store = readSecrets(repo, env);
     store[key] = value;
     writeSecrets(repo, env, store);
@@ -127,8 +331,9 @@ export const api = {
     const role = aws?.roleArn || connections.awsOidc.roleArn;
     const hasAws = !!role;
     const region = aws?.region || connections.awsOidc.region || "us-east-1";
-    const s = Object.fromEntries(secrets.map((x) => [x.key, x.present] as const));
-    
+    const s = Object.fromEntries(
+      secrets.map((x) => [x.key, x.present] as const)
+    );
 
     const results = [
       { label: "GitHub App installed", ok: hasGithubApp },
@@ -142,91 +347,101 @@ export const api = {
   },
 
   // --- Deploy APIs for Dashboard ---
-async startDeploy({
-  repoFullName: fromCallerRepo,
-  branch,
-  env,
-  yaml: fromCallerYaml,
-  provider,
-  path,
-}: {
-  repoFullName?: string;
-  branch?: string;
-  env?: string;
-  yaml?: string;
-  provider?: string;
-  path?: string;
-}) {
-  const pipelineStore = usePipelineStore.getState();
-  const repoFullName = fromCallerRepo || pipelineStore?.repoFullName || pipelineStore?.result?.repo;
-  const selectedBranch = branch || pipelineStore?.selectedBranch || "main";
-  const yaml = pipelineStore?.result?.generated_yaml;
-  const environment = env || pipelineStore?.environment || "dev";
+  async startDeploy({
+    repoFullName: fromCallerRepo,
+    branch,
+    env,
+    yaml: fromCallerYaml,
+    provider,
+    path,
+  }: {
+    repoFullName?: string;
+    branch?: string;
+    env?: string;
+    yaml?: string;
+    provider?: string;
+    path?: string;
+  }) {
+    const pipelineStore = usePipelineStore.getState();
+    const repoFullName =
+      fromCallerRepo ||
+      pipelineStore?.repoFullName ||
+      (pipelineStore as any)?.result?.repo;
+    const selectedBranch = branch || (pipelineStore as any)?.selectedBranch || "main";
+    const yaml = (pipelineStore as any)?.result?.generated_yaml;
+    const environment = env || (pipelineStore as any)?.environment || "dev";
 
-  const providerFinal = provider || pipelineStore?.provider || "aws";
-  const pathFinal = path || `.github/workflows/${environment}-deploy.yml`;
+    const providerFinal = provider || (pipelineStore as any)?.provider || "aws";
+    const pathFinal =
+      path || `.github/workflows/${environment}-deploy.yml`;
 
-  console.group("[Deploy Debug]");
-  console.log("repoFullName:", repoFullName);
-  console.log("selectedBranch:", selectedBranch);
-  console.log("environment:", environment);
-  console.log("provider:", providerFinal);
-  console.log("path:", pathFinal);
-  console.log("YAML length:", yaml ? yaml.length : 0);
-  console.groupEnd();
+    console.group("[Deploy Debug]");
+    console.log("repoFullName:", repoFullName);
+    console.log("selectedBranch:", selectedBranch);
+    console.log("environment:", environment);
+    console.log("provider:", providerFinal);
+    console.log("path:", pathFinal);
+    console.log("YAML length:", yaml ? yaml.length : 0);
+    console.groupEnd();
 
-  const payload = {
-    repoFullName,
-    branch: selectedBranch,
-    env: environment,
-    yaml,
-    provider: providerFinal,
-    path: pathFinal,
-  };
+    const payload = {
+      repoFullName,
+      branch: selectedBranch,
+      env: environment,
+      yaml,
+      provider: providerFinal,
+      path: pathFinal,
+    };
 
-  console.log("[Deploy] Final payload:", payload);
+    console.log("[Deploy] Final payload:", payload);
 
-  const res = await fetch(`${SERVER_BASE}/mcp/v1/pipeline_commit`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify(payload),
-  });
+    const res = await fetch(`${SERVER_BASE}/mcp/v1/pipeline_commit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(payload),
+    });
 
-  const data = await res.json().catch(() => ({}));
+    const data = await res.json().catch(() => ({}));
 
-  console.group("[Deploy Response]");
-  console.log("Status:", res.status);
-  console.log("Data:", data);
-  console.groupEnd();
+    console.group("[Deploy Response]");
+    console.log("Status:", res.status);
+    console.log("Data:", data);
+    console.groupEnd();
 
-  if (!res.ok) throw new Error(`Pipeline commit failed: ${res.statusText}`);
-  return data;
-},
+    if (!res.ok)
+      throw new Error(`Pipeline commit failed: ${res.statusText}`);
+    return data;
+  },
 
-  streamJob(_jobId: string, onEvent: (e: { ts: string; level: "info"; msg: string }) => void) {
+  streamJob(
+    _jobId: string,
+    onEvent: (e: { ts: string; level: "info"; msg: string }) => void
+  ) {
     const steps = [
       "Connecting to GitHub...",
       "Committing workflow file...",
       "Verifying commit...",
-      "Done ✅"
+      "Done ✅",
     ];
     let i = 0;
     const timer = setInterval(() => {
       if (i >= steps.length) return;
-      onEvent({ ts: new Date().toISOString(), level: "info", msg: steps[i++] });
+      onEvent({
+        ts: new Date().toISOString(),
+        level: "info",
+        msg: steps[i++],
+      });
       if (i >= steps.length) clearInterval(timer);
     }, 600);
     return () => clearInterval(timer);
   },
-
 };
 
 // Helper to start GitHub OAuth (server redirects back after callback)
 export function startGitHubOAuth(
   redirectTo: string = window.location.origin
 ) {
-  // Our server mounts OAuth at /auth/github/start and expects `redirect_to`
   const serverBase = BASE.replace(/\/api$/, "");
   const url = `${serverBase}/auth/github/start?redirect_to=${encodeURIComponent(
     redirectTo

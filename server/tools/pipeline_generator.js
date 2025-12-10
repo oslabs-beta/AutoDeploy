@@ -24,16 +24,10 @@ export const pipeline_generator = {
         artifact_name: z.string().optional(),
       })
       .optional(),
-    node_version: z.string().optional(),
-    install_command: z.string().optional(),
-    test_command: z.string().optional(),
-    build_command: z.string().optional(),
-    aws_role_arn: z.string().optional(),
-    stages: z.array(z.enum(['build','test','deploy'])).optional(),
   }),
 
   // Real handler (queries github_adapter for repo info and generates pipeline config)
-  handler: async ({ repo, branch = 'main', provider, template, options, node_version, install_command, test_command, build_command, aws_role_arn, stages }) => {
+  handler: async ({ repo, branch = 'main', provider, template, options }) => {
     const sessionToken = process.env.MCP_SESSION_TOKEN;
     let decoded = {};
     let userId = null;
@@ -232,92 +226,54 @@ export const pipeline_generator = {
     const selectedProvider = provider || inferredProvider;
     const selectedTemplate = template || inferredTemplate;
 
-    const nodeVersion = node_version || '20';
-    const installCmd = install_command || (selectedTemplate === 'node_app' ? 'npm ci' : 'pip install -r requirements.txt');
-    const testCmd = test_command || (selectedTemplate === 'node_app' ? 'npm test' : 'pytest');
-    const buildCmd = build_command || (selectedTemplate === 'node_app' ? 'npm run build' : 'echo "no build step"');
-    const roleArn = aws_role_arn || 'unset-role-arn';
-    const enabledStages = stages || ['build', 'test', 'deploy'];
+    const pipelineName = `${selectedProvider}-${selectedTemplate}-ci.yml`;
 
-    let generated_yaml = `name: CI/CD Pipeline for ${repo}
+    const generated_yaml = `
+name: CI/CD Pipeline for ${repo}
 on:
   push:
     branches:
       - ${branch}
 jobs:
-`;
-
-    if (selectedProvider === "jenkins") {
-      generated_yaml += `
-  trigger-jenkins-job:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger Jenkins Job
-        run: |
-          echo "Triggering Jenkins job for ${repo}..."
-          curl -X POST "https://jenkins.example.com/job/${repo.replace('/', '-')}/build"
-`;
-    } else {
-      if (enabledStages.includes('build')) {
-        generated_yaml += `
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${nodeVersion}
+      - name: Setup ${selectedTemplate === 'node_app' ? 'Node.js' : 'Python'}
+        uses: actions/setup-${
+          selectedTemplate === 'node_app' ? 'node' : 'python'
+        }@v4
       - name: Install Dependencies
-        run: ${installCmd}
-`;
-        if (enabledStages.includes('test')) {
-          generated_yaml += `
-      - name: Run Tests
-        run: ${testCmd}
-`;
+        run: ${
+          selectedTemplate === 'node_app'
+            ? 'npm ci'
+            : 'pip install -r requirements.txt'
         }
-        generated_yaml += `
-      - name: Build
-        run: ${buildCmd}
-`;
-      }
-      if (enabledStages.includes('deploy')) {
-        generated_yaml += `
+      - name: Run Tests
+        run: ${selectedTemplate === 'node_app' ? 'npm test' : 'pytest'}
   deploy:
-    ${enabledStages.includes('build') ? 'needs: build' : ''}
+    needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v3
-        with:
-          role-to-assume: ${roleArn}
-          aws-region: us-east-1
+      - name: Configure ${selectedProvider.toUpperCase()}
+        run: echo "Configuring ${selectedProvider.toUpperCase()} OIDC..."
       - name: Deploy Application
-        run: echo "Deploying ${repo} to AWS..."
+        run: echo "Deploying ${repo} to ${selectedProvider.toUpperCase()}..."
 `;
-      }
-    }
 
     return {
       success: true,
       data: {
-        pipeline_name: `${selectedProvider}-${selectedTemplate}-ci.yml`,
+        pipeline_name: pipelineName,
         repo,
         branch,
         provider: selectedProvider,
         template: selectedTemplate,
         options: options || {},
-        stages,
+        stages: ['build', 'test', 'deploy'],
         generated_yaml,
         repo_info: repoInfo,
         created_at: new Date().toISOString(),
-        node_version,
-        install_command,
-        test_command,
-        build_command,
-        aws_role_arn,
-        stages,
       },
     };
   },
