@@ -15,6 +15,7 @@ type PipelineState = {
     buildCmd: string;
     awsRoleArn?: string;
   };
+  provider: "aws" | "jenkins";
 
   // outputs from MCP
   result?: McpPipeline;
@@ -36,6 +37,7 @@ type PipelineState = {
 
 type PipelineActions = {
   setTemplate(t: string): void;
+  setProvider(p: "aws" | "jenkins"): void;
   toggleStage(s: Stage): void;
   setOption<K extends keyof PipelineState["options"]>(
     k: K,
@@ -61,6 +63,7 @@ const initial: PipelineState = {
     testCmd: "npm test",
     buildCmd: "npm run build",
   },
+  provider: "aws",
   roles: [],
   editing: false,
   status: "idle",

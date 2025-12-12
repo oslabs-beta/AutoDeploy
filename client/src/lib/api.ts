@@ -82,30 +82,60 @@ export const api = {
 
 
   // AI wizard – talks to /agent/wizard on the backend
+  // askYamlWizard: async (input: {
+  //   repoUrl: string;
+  //   provider: string;
+  //   branch: string;
+  //   message?: string;
+  //   yaml?: string;
+  // }) => {
+  //   const res = await fetch(`${SERVER_BASE}/agent/wizard/ai`, {
+  //     method: "POST",
+  //     headers: { "Content-Type": "application/json" },
+  //     credentials: "include",
+  //     body: JSON.stringify(input),
+  //   });
+
+  //   const payload = await res.json().catch(() => ({}));
+  //   if (!res.ok || (payload as any)?.success === false) {
+  //     throw new Error(
+  //       (payload as any)?.error || res.statusText || "Agent error"
+  //     );
+  //   }
+
+  //   // whatever runWizardAgent returns is in payload.data
+  //   return (payload as any).data;
+  // },
+
   askYamlWizard: async (input: {
-    repoUrl: string;
-    provider: string;
-    branch: string;
-    message?: string;
-    yaml?: string;
-  }) => {
-    const res = await fetch(`${SERVER_BASE}/agent/wizard`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify(input),
-    });
+  repoUrl: string;
+  provider: string;
+  branch: string;
+  message?: string;   // frontend name
+  yaml?: string;
+}) => {
+  const payload = {
+    ...input,
+    prompt: input.message ?? "",   // 👈 REQUIRED BY BACKEND
+  };
 
-    const payload = await res.json().catch(() => ({}));
-    if (!res.ok || (payload as any)?.success === false) {
-      throw new Error(
-        (payload as any)?.error || res.statusText || "Agent error"
-      );
-    }
+  delete (payload as any).message;  // 👈 prevent backend confusion
 
-    // whatever runWizardAgent returns is in payload.data
-    return (payload as any).data;
-  },
+  const res = await fetch(`${SERVER_BASE}/agent/wizard/ai`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(payload),
+  });
+
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok || data?.success === false) {
+    throw new Error(data?.error || res.statusText || "Agent error");
+  }
+
+  return data.data;
+},
 
   // ===== MCP helpers for repos / branches / pipeline generation =====
   async listRepos(): Promise<{ repos: string[] }> {
@@ -151,85 +181,10 @@ export const api = {
       return { branches: cachedBranches.get(repo) ?? [] };
     }
   },
-//  async listRepos(): Promise<{ repos: string[] }> {
-//     //  If we already have repos cached, reuse them.
-//     if (cachedRepos && cachedRepos.length > 0) {
-//       return { repos: cachedRepos };
-//     }
-
-//     //  If we've already tried once and failed, don't hammer the server.
-//     if (reposAttempted && !cachedRepos) {
-//       return { repos: [] };
-//     }
-
-//     reposAttempted = true;
-
-//     try {
-//       const outer = await mcp<{
-//         provider: string;
-//         user: string;
-//         repositories: { full_name: string }[];
-//       }>("repo_reader", {});
-
-//       const repos = outer?.repositories?.map((r) => r.full_name) ?? [];
-//       cachedRepos = repos;
-//       return { repos };
-//     } catch (err) {
-//       console.error("[api.listRepos] failed:", err);
-//       // Don't throw to avoid retry loops from effects; just return whatever we have (or empty).
-//       return { repos: cachedRepos ?? [] };
-//     }
-//   },
-
-    async listBranches(repo: string): Promise<{ branches: string[] }> {
-    // ✅ If we already have branches cached for this repo, reuse them.
-    const cached = cachedBranches.get(repo);
-    if (cached) {
-      return { branches: cached };
-    }
-
-    try {
-      // For now we still use repo_reader, but we only call it
-      // when the cache is cold. We can later swap this to a
-      // more specific MCP tool like "repo_branches".
-      const outer = await mcp<{
-        success?: boolean;
-        data?: { repositories: { full_name: string; branches?: string[] }[] };
-        repositories?: { full_name: string; branches?: string[] }[];
-      }>("repo_reader", {
-        // This extra input is safe: current server ignores it,
-        // future server can use it to optimize.
-        repoFullName: repo,
-      });
-
-      // Unwrap the payload (tool responses come back as { success, data })
-      const body = (outer as any)?.data ?? outer;
-
-      const match = body?.repositories?.find((r: any) => r.full_name === repo);
-      const branches = match?.branches ?? [];
-
-      // Cache even empty arrays so we don't re-query a repo with no branches
-      cachedBranches.set(repo, branches);
-
-      return { branches };
-    } catch (err) {
-      console.error("[api.listBranches] failed:", err);
-
-      // If we have anything cached (even empty), use it.
-      const fallback = cachedBranches.get(repo) ?? [];
-      return { branches: fallback };
-    }
-  },
 
   async createPipeline(payload: any) {
     const { repo, branch, template = "node_app", options } = payload || {};
-    const data = await mcp("pipeline_generator", {
-      repo,
-      branch,
-      provider: "aws",
-      template,
-      options: options || {},
-    });
+    const data = await mcp("pipeline_generator", payload);
     return data;
   },
 

@@ -65,7 +65,8 @@ app.use('/mcp/v1', pipelineCommitRouter);
 app.use('/mcp/v1', mcpRouter);
 app.use('/auth/github', githubAuthRouter);
 app.use(authRouter);
-app.use('/auth/aws', authAws);
+// not currently using
+// app.use('/auth/aws', authAws);
 app.use('/auth/google', authGoogle);
 app.use('/jenkins', jenkinsRouter);
 app.use('/pipeline-sessions', pipelineSessionsRouter);
