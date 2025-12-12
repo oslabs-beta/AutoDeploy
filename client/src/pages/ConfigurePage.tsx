@@ -209,7 +209,9 @@ export default function ConfigurePage() {
                   disabled={busy}
                   value={options.nodeVersion}
                   onChange={(e) => setOption("nodeVersion", e.target.value)}
-                  className="rounded-md border px-3 py-2 text-sm font-mono"
+                  className="rounded-md border px-3 py-2 text-sm font-mono
+           text-slate-900 bg-white
+           disabled:bg-slate-100 disabled:text-slate-400"
                   placeholder="20"
                 />
               </label>
@@ -220,7 +222,9 @@ export default function ConfigurePage() {
                   disabled={busy}
                   value={options.installCmd}
                   onChange={(e) => setOption("installCmd", e.target.value)}
-                  className="rounded-md border px-3 py-2 text-sm font-mono"
+                  className="rounded-md border px-3 py-2 text-sm font-mono
+           text-slate-900 bg-white
+           disabled:bg-slate-100 disabled:text-slate-400"
                   placeholder="npm ci"
                 />
               </label>
@@ -231,7 +235,9 @@ export default function ConfigurePage() {
                   disabled={busy}
                   value={options.testCmd}
                   onChange={(e) => setOption("testCmd", e.target.value)}
-                  className="rounded-md border px-3 py-2 text-sm font-mono"
+                  className="rounded-md border px-3 py-2 text-sm font-mono
+           text-slate-900 bg-white
+           disabled:bg-slate-100 disabled:text-slate-400"
                   placeholder="npm test"
                 />
               </label>
@@ -242,7 +248,9 @@ export default function ConfigurePage() {
                   disabled={busy}
                   value={options.buildCmd}
                   onChange={(e) => setOption("buildCmd", e.target.value)}
-                  className="rounded-md border px-3 py-2 text-sm font-mono"
+                  className="rounded-md border px-3 py-2 text-sm font-mono
+           text-slate-900 bg-white
+           disabled:bg-slate-100 disabled:text-slate-400"
                   placeholder="npm run build"
                 />
               </label>
