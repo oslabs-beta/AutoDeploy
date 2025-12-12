@@ -3,10 +3,10 @@ in your /routes folder, make sure to keep your router names consistent!
 */
 
 import express from 'express';
-//import { runWizardAgent } from '../agent/wizardAgent.js';
+import { runWizardAgent } from '../agent/wizardAgent.js';
 // OLD: runWizardAgent no longer exists
-import { generateYAML, editYAML, runWizardAgent } from "../agent/wizardAgent.js";
-import { pipeline_generator } from '../tools/pipeline_generator.old.js';
+// import { generateYAML, editYAML, runWizardAgent } from "../agent/wizardAgent.js";
+import { pipeline_generator } from '../tools/pipeline_generator.js';
 import { repo_reader } from '../tools/repo_reader.js';
 import { oidc_adapter } from '../tools/oidc_adapter.js';
 import { requireSession } from '../lib/requireSession.js';

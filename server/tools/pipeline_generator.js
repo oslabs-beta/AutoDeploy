@@ -15,7 +15,7 @@ export const pipeline_generator = {
   input_schema: z.object({
     repo: z.string(),
     branch: z.string().default('main'),
-    provider: z.enum(['aws', 'jenkins']),
+    provider: z.enum(['aws', 'jenkins']).optional().default('aws'),
     template: z.enum(['node_app', 'python_app', 'container_service']),
     options: z
       .object({
@@ -27,7 +27,7 @@ export const pipeline_generator = {
   }),
 
   // Real handler (queries github_adapter for repo info and generates pipeline config)
-  handler: async ({ repo, branch = 'main', provider, template, options }) => {
+  handler: async ({ repo, branch = 'main', provider = 'aws', template, options }) => {
     const sessionToken = process.env.MCP_SESSION_TOKEN;
     let decoded = {};
     let userId = null;
