@@ -34,7 +34,8 @@ jobs:
         run: |
           cd server
           npm test --if-present
-  #backend image
+
+  # backend image
   docker-image:
     needs: build-test
     runs-on: ubuntu-latest
@@ -50,6 +51,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Compute lowercase owner
+        id: vars
+        shell: bash
+        run: |
+          OWNER_LC="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          echo "owner_lc=$OWNER_LC" >> "$GITHUB_OUTPUT"
+
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -59,20 +67,20 @@ jobs:
 
       - name: Build Docker image
         run: |
-          IMAGE_ID=ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
-          VERSION=${{ github.sha }}
+          IMAGE_ID="ghcr.io/${{ steps.vars.outputs.owner_lc }}/${{ env.IMAGE_NAME }}"
+          VERSION="${{ github.sha }}"
 
           echo "IMAGE_ID=$IMAGE_ID" >> $GITHUB_ENV
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
-          docker build -t $IMAGE_ID:$VERSION -t $IMAGE_ID:latest .
+          docker build -t "$IMAGE_ID:$VERSION" -t "$IMAGE_ID:latest" .
 
       - name: Push Docker image
         run: |
-          docker push $IMAGE_ID:$VERSION
-          docker push $IMAGE_ID:latest
+          docker push "$IMAGE_ID:$VERSION"
+          docker push "$IMAGE_ID:latest"
 
-  #frontend image
+  # frontend image
   frontend-docker-image:
     needs: build-test
     runs-on: ubuntu-latest
@@ -88,6 +96,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Compute lowercase owner
+        id: vars
+        shell: bash
+        run: |
+          OWNER_LC="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          echo "owner_lc=$OWNER_LC" >> "$GITHUB_OUTPUT"
+
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -97,20 +112,20 @@ jobs:
 
       - name: Build frontend Docker image
         run: |
-          IMAGE_ID=ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
-          VERSION=${{ github.sha }}
+          FRONTEND_IMAGE_ID="ghcr.io/${{ steps.vars.outputs.owner_lc }}/${{ env.IMAGE_NAME }}"
+          FRONTEND_VERSION="${{ github.sha }}"
 
-          echo "FRONTEND_IMAGE_ID=$IMAGE_ID" >> $GITHUB_ENV
-          echo "FRONTEND_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "FRONTEND_IMAGE_ID=$FRONTEND_IMAGE_ID" >> $GITHUB_ENV
+          echo "FRONTEND_VERSION=$FRONTEND_VERSION" >> $GITHUB_ENV
 
-          docker build -f Dockerfile.frontend -t $IMAGE_ID:$VERSION -t $IMAGE_ID:latest .
+          docker build -f Dockerfile.frontend -t "$FRONTEND_IMAGE_ID:$FRONTEND_VERSION" -t "$FRONTEND_IMAGE_ID:latest" .
 
       - name: Push frontend Docker image
         run: |
-          docker push $FRONTEND_IMAGE_ID:$FRONTEND_VERSION
-          docker push $FRONTEND_IMAGE_ID:latest
+          docker push "$FRONTEND_IMAGE_ID:$FRONTEND_VERSION"
+          docker push "$FRONTEND_IMAGE_ID:latest"
 
-  #backend cloud deployment
+  # backend cloud deployment
   deploy-gcp:
     needs: docker-image
     runs-on: ubuntu-latest
@@ -121,6 +136,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Compute lowercase owner
+        id: vars
+        shell: bash
+        run: |
+          OWNER_LC="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          echo "owner_lc=$OWNER_LC" >> "$GITHUB_OUTPUT"
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -138,25 +160,27 @@ jobs:
 
       - name: Pull image from GHCR
         run: |
-          IMAGE_ID=ghcr.io/${{ github.repository_owner }}/mcp-backend
-          VERSION=${{ github.sha }}
+          IMAGE_ID="ghcr.io/${{ steps.vars.outputs.owner_lc }}/mcp-backend"
+          VERSION="${{ github.sha }}"
+
           echo "IMAGE_ID=$IMAGE_ID" >> $GITHUB_ENV
           echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          docker pull $IMAGE_ID:$VERSION
+
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker pull "$IMAGE_ID:$VERSION"
 
       - name: Tag and push image to Artifact Registry
         run: |
-          AR_IMAGE=us-east1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/mcp-backend/mcp-backend
-          docker tag ghcr.io/${{ github.repository_owner }}/mcp-backend:${{ github.sha }} $AR_IMAGE:${{ github.sha }}
-          docker push $AR_IMAGE:${{ github.sha }}
+          AR_IMAGE="us-east1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/mcp-backend/mcp-backend"
+          docker tag "$IMAGE_ID:$VERSION" "$AR_IMAGE:$VERSION"
+          docker push "$AR_IMAGE:$VERSION"
           echo "AR_IMAGE=$AR_IMAGE" >> $GITHUB_ENV
 
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy mcp-backend \
-            --image $AR_IMAGE:${{ github.sha }} \
-            --region ${{ secrets.GCP_REGION }} \
+            --image "$AR_IMAGE:${{ github.sha }}" \
+            --region "${{ secrets.GCP_REGION }}" \
             --platform managed \
             --allow-unauthenticated \
             --port 3000
@@ -172,6 +196,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Compute lowercase owner
+        id: vars
+        shell: bash
+        run: |
+          OWNER_LC="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          echo "owner_lc=$OWNER_LC" >> "$GITHUB_OUTPUT"
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -189,25 +220,27 @@ jobs:
 
       - name: Pull frontend image from GHCR
         run: |
-          IMAGE_ID=ghcr.io/${{ github.repository_owner }}/mcp-frontend
-          VERSION=${{ github.sha }}
-          echo "FRONTEND_IMAGE_ID=$IMAGE_ID" >> $GITHUB_ENV
-          echo "FRONTEND_VERSION=$VERSION" >> $GITHUB_ENV
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          docker pull $IMAGE_ID:$VERSION
+          FRONTEND_IMAGE_ID="ghcr.io/${{ steps.vars.outputs.owner_lc }}/mcp-frontend"
+          FRONTEND_VERSION="${{ github.sha }}"
+
+          echo "FRONTEND_IMAGE_ID=$FRONTEND_IMAGE_ID" >> $GITHUB_ENV
+          echo "FRONTEND_VERSION=$FRONTEND_VERSION" >> $GITHUB_ENV
+
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker pull "$FRONTEND_IMAGE_ID:$FRONTEND_VERSION"
 
       - name: Tag & push frontend image to Artifact Registry
         run: |
-          AR_FRONTEND_IMAGE=us-east1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/mcp-frontend/mcp-frontend
-          docker tag ghcr.io/${{ github.repository_owner }}/mcp-frontend:${{ github.sha }} $AR_FRONTEND_IMAGE:${{ github.sha }}
-          docker push $AR_FRONTEND_IMAGE:${{ github.sha }}
+          AR_FRONTEND_IMAGE="us-east1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/mcp-frontend/mcp-frontend"
+          docker tag "$FRONTEND_IMAGE_ID:$FRONTEND_VERSION" "$AR_FRONTEND_IMAGE:$FRONTEND_VERSION"
+          docker push "$AR_FRONTEND_IMAGE:$FRONTEND_VERSION"
           echo "AR_FRONTEND_IMAGE=$AR_FRONTEND_IMAGE" >> $GITHUB_ENV
 
       - name: Deploy frontend to Cloud Run
         run: |
           gcloud run deploy mcp-frontend \
-            --image $AR_FRONTEND_IMAGE:${{ github.sha }} \
-            --region ${{ secrets.GCP_REGION }} \
+            --image "$AR_FRONTEND_IMAGE:${{ github.sha }}" \
+            --region "${{ secrets.GCP_REGION }}" \
             --platform managed \
             --allow-unauthenticated \
             --port 80
