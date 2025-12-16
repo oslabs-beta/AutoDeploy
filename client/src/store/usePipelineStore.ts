@@ -52,6 +52,12 @@ type PipelineActions = {
   setEditedYaml(y: string): void;
   resetYaml(): void;
   resetAll(): void;
+
+  hydrateFromWizard(payload: {
+    repo: string;
+    generatedYaml: string;
+    pipelineName?: string;
+  }): void;
 };
 
 const initial: PipelineState = {
@@ -211,6 +217,26 @@ export const usePipelineStore = create<PipelineState & PipelineActions>()(
         yaml,
         title: "Add CI pipeline",
       });
+    },
+
+    hydrateFromWizard({ repo, generatedYaml, pipelineName }) {
+      set({
+        result: {
+          ...(get().result ?? {}),
+          generated_yaml: generatedYaml,
+          yaml: generatedYaml,
+          pipeline_name: pipelineName ?? "ci.yml",
+        },
+        repoFullName: repo,
+        status: "success",
+        editing: false,
+        editedYaml: undefined,
+      });
+
+      console.log(
+        "[usePipelineStore] Hydrated YAML from wizard:",
+        generatedYaml.slice(0, 80)
+      );
     },
 
     setEditing: (b) => set({ editing: b }),

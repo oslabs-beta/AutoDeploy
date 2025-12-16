@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useRepoStore } from "../store/useRepoStore";
 import { usePipelineStore } from "../store/usePipelineStore";
+import { useWizardStore } from "../store/useWizardStore";
 import { api } from "../lib/api";
 
 type ChatMessage = {
@@ -30,7 +31,16 @@ export default function ConfigurePage() {
     editedYaml,
     setEditedYaml,
     getEffectiveYaml,
+    hydrateFromWizard,
   } = usePipelineStore();
+
+  const {
+    repoInfo,
+    pipelineInfo,
+    setRepoInfo,
+    setPipelineInfo,
+    setLastToolCalled,
+  } = useWizardStore();
 
   const yaml = getEffectiveYaml();
   const busy = status === "loading";
@@ -57,6 +67,13 @@ export default function ConfigurePage() {
       alert("Pick a repo + branch on the Connect page first.");
       return;
     }
+    console.log("[ConfigurePage] Generate clicked with inputs:", {
+      repo,
+      branch,
+      template,
+      stages,
+      options,
+    });
     await regenerate({ repo, branch });
   };
 
@@ -92,40 +109,92 @@ export default function ConfigurePage() {
     setChatInput("");
     setChatLoading(true);
 
-      try {
-    const res = await api.askYamlWizard({
-      repoUrl: repo,       // backend expects "repoUrl"
-      provider: "aws",     // or whatever provider you use
-      branch: branch,      // backend expects "branch"
-      message: trimmed,    // optional, for your agent logic
-      yaml,                // optional, current YAML for context
-    });
+    try {
+      const res = await api.askYamlWizard({
+        repoUrl: repo,       // backend expects "repoUrl"
+        provider: "aws",     // or whatever provider you use
+        branch: branch,      // backend expects "branch"
+        message: trimmed,    // optional, for your agent logic
+        yaml,                // optional, current YAML for context
+      });
 
-         const text =
-      (res as any)?.reply ??
-      (res as any)?.message ??
-      (res as any)?.content ??
-      JSON.stringify(res, null, 2);
+      // ---- Update wizard context memory ----
+      if ((res as any)?.tool_called) {
+        setLastToolCalled((res as any).tool_called);
+      }
 
-    const assistantMessage: ChatMessage = {
-      role: "assistant",
-      content: text,
-    };
+      // If repo info is available from selection or tool output, store it
+      if (repo) {
+        setRepoInfo({
+          fullName: repo,
+        });
+      }
 
-    setChatMessages((prev) => [...prev, assistantMessage]);
-  } catch (e: any) {
-    console.error("[ConfigurePage] AI wizard error:", e);
-    const assistantMessage: ChatMessage = {
-      role: "assistant",
-      content:
-        "Sorry, I ran into an issue talking to the AI backend.\n\n" +
-        `Error: ${e?.message ?? "Unknown error"}`,
-    };
-    setChatMessages((prev) => [...prev, assistantMessage]);
-  } finally {
-    setChatLoading(false);
-  }
-};
+      // If a pipeline was generated, hydrate pipeline store + wizard context
+      if ((res as any)?.tool_called === "pipeline_generator") {
+        const generatedYaml =
+          (res as any)?.generated_yaml ??
+          (res as any)?.tool_output?.data?.generated_yaml;
+
+        const pipelineName =
+          (res as any)?.pipeline_metadata?.data?.pipeline_name ??
+          (res as any)?.pipeline_metadata?.pipeline_name;
+
+        if (generatedYaml) {
+          hydrateFromWizard({
+            repo,
+            generatedYaml,
+            pipelineName,
+          });
+        }
+
+        setPipelineInfo({
+          pipelineName,
+          branch,
+          provider: "aws",
+          stages,
+        });
+      }
+
+      let text: string;
+
+      if ((res as any)?.reply) {
+        text = (res as any).reply;
+      } else if ((res as any)?.message) {
+        text = (res as any).message;
+      } else if (
+        (res as any)?.tool_called === "repo_reader" &&
+        Array.isArray((res as any)?.tool_output?.data?.data?.repositories)
+      ) {
+        const count =
+          (res as any).tool_output.data.data.repositories.length;
+        text = `I found ${count} repositories. You can select one from the list to continue.`;
+      } else if (repoInfo?.fullName) {
+        text = `I’m looking at ${repoInfo.fullName}. What would you like to change about the pipeline?`;
+      } else {
+        text =
+          "I couldn’t map that request to an action yet. You can ask me to modify the pipeline, deploy settings, or AWS role.";
+      }
+
+      const assistantMessage: ChatMessage = {
+        role: "assistant",
+        content: text,
+      };
+
+      setChatMessages((prev) => [...prev, assistantMessage]);
+    } catch (e: any) {
+      console.error("[ConfigurePage] AI wizard error:", e);
+      const assistantMessage: ChatMessage = {
+        role: "assistant",
+        content:
+          "Sorry, I ran into an issue talking to the AI backend.\n\n" +
+          `Error: ${e?.message ?? "Unknown error"}`,
+      };
+      setChatMessages((prev) => [...prev, assistantMessage]);
+    } finally {
+      setChatLoading(false);
+    }
+  };
 
   const handleChatKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (
     e

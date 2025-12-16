@@ -21,14 +21,33 @@ export const pipeline_generator = {
     template: z.enum(['node_app', 'python_app', 'container_service']),
     options: z
       .object({
-        run_tests: z.boolean().default(true),
-        include_trivy_scan: z.boolean().default(false),
+        // legacy flags
+        run_tests: z.boolean().optional(),
+        include_trivy_scan: z.boolean().optional(),
         artifact_name: z.string().optional(),
+
+        // frontend-driven config
+        nodeVersion: z.string().optional(),
+        installCmd: z.string().optional(),
+        testCmd: z.string().optional(),
+        buildCmd: z.string().optional(),
+        awsRoleArn: z.string().optional(),
+        stages: z.array(z.enum(['build', 'test', 'deploy'])).optional(),
       })
       .optional(),
   }),
 
   // Real handler (queries github_adapter for repo info and generates pipeline config)
+  handler: async ({ repo, branch = 'main', provider = 'aws', template, options }) => {
+    const normalized = {
+      nodeVersion: options?.nodeVersion,
+      installCmd: options?.installCmd,
+      testCmd: options?.testCmd,
+      buildCmd: options?.buildCmd,
+      awsRoleArn: options?.awsRoleArn,
+      stages: options?.stages,
+    };
+
   handler: async ({
     repo,
     branch = 'main',
@@ -236,6 +255,8 @@ export const pipeline_generator = {
     const selectedProvider = provider || inferredProvider;
     const selectedTemplate = template || inferredTemplate;
 
+    console.log('🧪 pipeline_generator normalized options:', normalized);
+
     const pipelineName = `${selectedProvider}-${selectedTemplate}-ci.yml`;
 
     // GCP path: generate a real Cloud Run workflow (GHCR -> Artifact Registry -> Cloud Run)
@@ -277,6 +298,11 @@ export const pipeline_generator = {
 
     const generated_yaml = `
 name: CI/CD Pipeline for ${repo}
+
+permissions:
+  id-token: write
+  contents: read
+
 on:
   push:
     branches:
@@ -286,26 +312,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup ${selectedTemplate === 'node_app' ? 'Node.js' : 'Python'}
-        uses: actions/setup-${
-          selectedTemplate === 'node_app' ? 'node' : 'python'
-        }@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${normalized.nodeVersion ?? '20'}
       - name: Install Dependencies
         run: ${
-          selectedTemplate === 'node_app'
+          normalized.installCmd ??
+          (selectedTemplate === 'node_app'
             ? 'npm ci'
-            : 'pip install -r requirements.txt'
+            : 'pip install -r requirements.txt')
         }
       - name: Run Tests
-        run: ${selectedTemplate === 'node_app' ? 'npm test' : 'pytest'}
+        run: ${
+          normalized.testCmd ??
+          (selectedTemplate === 'node_app' ? 'npm test' : 'pytest')
+        }
   deploy:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Configure ${selectedProvider.toUpperCase()}
-        run: echo "Configuring ${selectedProvider.toUpperCase()} OIDC..."
+      - uses: actions/checkout@v4
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${normalized.awsRoleArn ?? 'REPLACE_ME'}
+          aws-region: us-east-1
       - name: Deploy Application
-        run: echo "Deploying ${repo} to ${selectedProvider.toUpperCase()}..."
+        run: echo "Deploying ${repo} to AWS..."
 `;
 
     return {
@@ -317,7 +351,7 @@ jobs:
         provider: selectedProvider,
         template: selectedTemplate,
         options: options || {},
-        stages: ['build', 'test', 'deploy'],
+        stages: normalized.stages ?? ['build', 'test', 'deploy'],
         generated_yaml,
         repo_info: repoInfo,
         created_at: new Date().toISOString(),
