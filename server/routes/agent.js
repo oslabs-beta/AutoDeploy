@@ -18,18 +18,16 @@ router.post('/wizard', requireSession, async (req, res) => {
   try {
     const { repoUrl, provider, branch } = req.body;
     if (!repoUrl || !provider || !branch) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: 'Missing required fields: repoUrl, provider, branch',
-        });
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: repoUrl, provider, branch',
+      });
     }
     const result = await runWizardAgent({
       repoUrl,
       provider,
       branch,
-      cookie: req.headers.cookie
+      cookie: req.headers.cookie,
     });
     res.json({ success: true, data: result });
   } catch (err) {
@@ -43,11 +41,13 @@ router.post('/wizard/ai', requireSession, async (req, res) => {
   try {
     const { prompt } = req.body;
     if (!prompt) {
-      return res.status(400).json({ success: false, error: 'Missing required field: prompt' });
+      return res
+        .status(400)
+        .json({ success: false, error: 'Missing required field: prompt' });
     }
     const result = await runWizardAgent({
       prompt,
-      cookie: req.headers.cookie
+      cookie: req.headers.cookie,
     });
     res.json({ success: true, data: result });
   } catch (err) {
@@ -56,25 +56,80 @@ router.post('/wizard/ai', requireSession, async (req, res) => {
   }
 });
 
+// Normailize the repoUrl
+function normalizeRepo(repoUrlOrSlug) {
+  // If it's already "owner/repo", return it
+  if (repoUrlOrSlug && !repoUrlOrSlug.startsWith('http')) {
+    return repoUrlOrSlug;
+  }
+
+  // If it's a URL, extract owner/repo
+  const url = new URL(repoUrlOrSlug);
+  const parts = url.pathname
+    .replace(/^\//, '')
+    .replace(/\.git$/, '')
+    .split('/');
+
+  return `${parts[0]}/${parts[1]}`;
+}
+
 // Generate pipeline only
 router.post('/pipeline', requireSession, async (req, res) => {
   try {
-    const { repoUrl } = req.body;
+    const {
+      repoUrl,
+      branch = 'main',
+      template = 'node_app',
+      options = {},
+    } = req.body;
+
     if (!repoUrl) {
       return res
         .status(400)
         .json({ success: false, error: 'Missing required field: repoUrl' });
     }
-    const yaml = await pipeline_generator.handler({
-      repo: repoUrl,
-      provider: 'aws',
-      template: 'node_app',
+
+    const repoSlug = normalizeRepo(repoUrl);
+
+    const result = await pipeline_generator.handler({
+      repo: repoSlug, // ✅ owner/repo (GitHub API safe)
+      repoUrl, // optional: keep if cloning elsewhere
+      branch,
+      provider: 'gcp',
+      template,
+      options,
     });
-    res.json({ success: true, data: yaml });
+
+    return res.json(result);
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error('[pipeline error]', err);
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
   }
 });
+
+// Generate pipeline only
+// router.post('/pipeline', requireSession, async (req, res) => {
+//   try {
+//     const { repoUrl } = req.body;
+//     if (!repoUrl) {
+//       return res
+//         .status(400)
+//         .json({ success: false, error: 'Missing required field: repoUrl' });
+//     }
+//     const yaml = await pipeline_generator.handler({
+//       repo: repoUrl,
+//       // provider: 'aws', testing
+//       provider: 'gcp',
+//       template: 'node_app',
+//     });
+//     res.json({ success: true, data: yaml });
+//   } catch (err) {
+//     res.status(500).json({ success: false, error: err.message });
+//   }
+// });
 
 // Read repository metadata
 router.post('/analyze', requireSession, async (req, res) => {
