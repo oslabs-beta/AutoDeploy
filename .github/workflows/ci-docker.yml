@@ -1,28 +1,49 @@
-name: CI & Docker
+name: CI & Docker (GCP Cloud Run)
 
 on:
   push:
     branches:
       - main
       - lorenc-ci
+      - lorenc-cicd
       - paython-mcp
       - feature/configure-chat-ui
   pull_request:
     branches:
       - main
 
+# Avoid overlapping deploys for the same ref
+concurrency:
+  group: mcp-cicd-${{ github.ref }}
+  cancel-in-progress: true
+
+# Common env values
+env:
+  NODE_VERSION: 20
+  REGION: ${{ secrets.GCP_REGION }}
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  AR_HOST: us-east1-docker.pkg.dev
+
+  BACKEND_IMAGE_NAME: mcp-backend
+  FRONTEND_IMAGE_NAME: mcp-frontend
+
+  BACKEND_AR_REPO: mcp-backend
+  FRONTEND_AR_REPO: mcp-frontend
+
+  BACKEND_SERVICE: mcp-backend
+  FRONTEND_SERVICE: mcp-frontend
+
 jobs:
   build-test:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Use Node.js 20
+      - name: Use Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
       - name: Install dependencies
@@ -35,17 +56,12 @@ jobs:
           cd server
           npm test --if-present
 
-  # backend image
-  docker-image:
+  build-backend:
     needs: build-test
     runs-on: ubuntu-latest
-
     permissions:
       contents: read
       packages: write
-
-    env:
-      IMAGE_NAME: mcp-backend
 
     steps:
       - name: Checkout repository
@@ -58,39 +74,35 @@ jobs:
           OWNER_LC="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
           echo "owner_lc=$OWNER_LC" >> "$GITHUB_OUTPUT"
 
-      - name: Login to GitHub Container Registry
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build Docker image
+      - name: Build backend image
+        shell: bash
         run: |
-          IMAGE_ID="ghcr.io/${{ steps.vars.outputs.owner_lc }}/${{ env.IMAGE_NAME }}"
+          BACKEND_GHCR="ghcr.io/${{ steps.vars.outputs.owner_lc }}/${{ env.BACKEND_IMAGE_NAME }}"
           VERSION="${{ github.sha }}"
 
-          echo "IMAGE_ID=$IMAGE_ID" >> $GITHUB_ENV
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "BACKEND_GHCR=$BACKEND_GHCR" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
-          docker build -t "$IMAGE_ID:$VERSION" -t "$IMAGE_ID:latest" .
+          docker build -t "$BACKEND_GHCR:$VERSION" -t "$BACKEND_GHCR:latest" .
 
-      - name: Push Docker image
+      - name: Push backend image
         run: |
-          docker push "$IMAGE_ID:$VERSION"
-          docker push "$IMAGE_ID:latest"
+          docker push "$BACKEND_GHCR:$VERSION"
+          docker push "$BACKEND_GHCR:latest"
 
-  # frontend image
-  frontend-docker-image:
+  build-frontend:
     needs: build-test
     runs-on: ubuntu-latest
-
     permissions:
       contents: read
       packages: write
-
-    env:
-      IMAGE_NAME: mcp-frontend
 
     steps:
       - name: Checkout repository
@@ -103,31 +115,31 @@ jobs:
           OWNER_LC="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
           echo "owner_lc=$OWNER_LC" >> "$GITHUB_OUTPUT"
 
-      - name: Login to GitHub Container Registry
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build frontend Docker image
+      - name: Build frontend image
+        shell: bash
         run: |
-          FRONTEND_IMAGE_ID="ghcr.io/${{ steps.vars.outputs.owner_lc }}/${{ env.IMAGE_NAME }}"
-          FRONTEND_VERSION="${{ github.sha }}"
+          FRONTEND_GHCR="ghcr.io/${{ steps.vars.outputs.owner_lc }}/${{ env.FRONTEND_IMAGE_NAME }}"
+          VERSION="${{ github.sha }}"
 
-          echo "FRONTEND_IMAGE_ID=$FRONTEND_IMAGE_ID" >> $GITHUB_ENV
-          echo "FRONTEND_VERSION=$FRONTEND_VERSION" >> $GITHUB_ENV
+          echo "FRONTEND_GHCR=$FRONTEND_GHCR" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
-          docker build -f Dockerfile.frontend -t "$FRONTEND_IMAGE_ID:$FRONTEND_VERSION" -t "$FRONTEND_IMAGE_ID:latest" .
+          docker build -f Dockerfile.frontend -t "$FRONTEND_GHCR:$VERSION" -t "$FRONTEND_GHCR:latest" .
 
-      - name: Push frontend Docker image
+      - name: Push frontend image
         run: |
-          docker push "$FRONTEND_IMAGE_ID:$FRONTEND_VERSION"
-          docker push "$FRONTEND_IMAGE_ID:latest"
+          docker push "$FRONTEND_GHCR:$VERSION"
+          docker push "$FRONTEND_GHCR:latest"
 
-  # backend cloud deployment
-  deploy-gcp:
-    needs: docker-image
+  deploy-backend:
+    needs: build-backend
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -144,50 +156,59 @@ jobs:
           OWNER_LC="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
           echo "owner_lc=$OWNER_LC" >> "$GITHUB_OUTPUT"
 
+      # NOTE: Using SA key json for now (works). Upgrade to OIDC/WIF later.
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
 
+      - name: Debug GCP env
+        run: |
+          echo "PROJECT_ID=${{ env.PROJECT_ID }}"
+          echo "REGION=${{ env.REGION }}"
+
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          project_id: ${{ env.PROJECT_ID }}
 
       - name: Configure Docker for Artifact Registry
         run: |
-          gcloud auth configure-docker us-east1-docker.pkg.dev --quiet
+          gcloud auth configure-docker ${{ env.AR_HOST }} --quiet
 
-      - name: Pull image from GHCR
+      - name: Pull backend image from GHCR
+        shell: bash
         run: |
-          IMAGE_ID="ghcr.io/${{ steps.vars.outputs.owner_lc }}/mcp-backend"
+          BACKEND_GHCR="ghcr.io/${{ steps.vars.outputs.owner_lc }}/${{ env.BACKEND_IMAGE_NAME }}"
           VERSION="${{ github.sha }}"
 
-          echo "IMAGE_ID=$IMAGE_ID" >> $GITHUB_ENV
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "BACKEND_GHCR=$BACKEND_GHCR" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-          docker pull "$IMAGE_ID:$VERSION"
+          docker pull "$BACKEND_GHCR:$VERSION"
 
-      - name: Tag and push image to Artifact Registry
+      - name: Tag & push backend image to Artifact Registry
+        shell: bash
         run: |
-          AR_IMAGE="us-east1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/mcp-backend/mcp-backend"
-          docker tag "$IMAGE_ID:$VERSION" "$AR_IMAGE:$VERSION"
-          docker push "$AR_IMAGE:$VERSION"
-          echo "AR_IMAGE=$AR_IMAGE" >> $GITHUB_ENV
+          BACKEND_AR_IMAGE="${{ env.AR_HOST }}/${{ env.PROJECT_ID }}/${{ env.BACKEND_AR_REPO }}/${{ env.BACKEND_IMAGE_NAME }}"
+          echo "BACKEND_AR_IMAGE=$BACKEND_AR_IMAGE" >> "$GITHUB_ENV"
 
-      - name: Deploy to Cloud Run
+          docker tag "$BACKEND_GHCR:$VERSION" "$BACKEND_AR_IMAGE:$VERSION"
+          docker push "$BACKEND_AR_IMAGE:$VERSION"
+
+      - name: Deploy backend to Cloud Run
         run: |
-          gcloud run deploy mcp-backend \
-            --image "$AR_IMAGE:${{ github.sha }}" \
-            --region "${{ secrets.GCP_REGION }}" \
+          gcloud run deploy "${{ env.BACKEND_SERVICE }}" \
+            --image "$BACKEND_AR_IMAGE:$VERSION" \
+            --region "${{ env.REGION }}" \
             --platform managed \
             --allow-unauthenticated \
-            --port 3000
+            --port 3000 \
+            --quiet
 
-  # frontend cloud deployment
-  deploy-gcp-frontend:
-    needs: frontend-docker-image
+  deploy-frontend:
+    needs: build-frontend
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -204,43 +225,53 @@ jobs:
           OWNER_LC="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
           echo "owner_lc=$OWNER_LC" >> "$GITHUB_OUTPUT"
 
+      # NOTE: Using SA key json for now (works). Upgrade to OIDC/WIF later.
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
 
+      - name: Debug GCP env
+        run: |
+          echo "PROJECT_ID=${{ env.PROJECT_ID }}"
+          echo "REGION=${{ env.REGION }}"
+
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          project_id: ${{ env.PROJECT_ID }}
 
       - name: Configure Docker for Artifact Registry
         run: |
-          gcloud auth configure-docker us-east1-docker.pkg.dev --quiet
+          gcloud auth configure-docker ${{ env.AR_HOST }} --quiet
 
       - name: Pull frontend image from GHCR
+        shell: bash
         run: |
-          FRONTEND_IMAGE_ID="ghcr.io/${{ steps.vars.outputs.owner_lc }}/mcp-frontend"
-          FRONTEND_VERSION="${{ github.sha }}"
+          FRONTEND_GHCR="ghcr.io/${{ steps.vars.outputs.owner_lc }}/${{ env.FRONTEND_IMAGE_NAME }}"
+          VERSION="${{ github.sha }}"
 
-          echo "FRONTEND_IMAGE_ID=$FRONTEND_IMAGE_ID" >> $GITHUB_ENV
-          echo "FRONTEND_VERSION=$FRONTEND_VERSION" >> $GITHUB_ENV
+          echo "FRONTEND_GHCR=$FRONTEND_GHCR" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-          docker pull "$FRONTEND_IMAGE_ID:$FRONTEND_VERSION"
+          docker pull "$FRONTEND_GHCR:$VERSION"
 
       - name: Tag & push frontend image to Artifact Registry
+        shell: bash
         run: |
-          AR_FRONTEND_IMAGE="us-east1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/mcp-frontend/mcp-frontend"
-          docker tag "$FRONTEND_IMAGE_ID:$FRONTEND_VERSION" "$AR_FRONTEND_IMAGE:$FRONTEND_VERSION"
-          docker push "$AR_FRONTEND_IMAGE:$FRONTEND_VERSION"
-          echo "AR_FRONTEND_IMAGE=$AR_FRONTEND_IMAGE" >> $GITHUB_ENV
+          FRONTEND_AR_IMAGE="${{ env.AR_HOST }}/${{ env.PROJECT_ID }}/${{ env.FRONTEND_AR_REPO }}/${{ env.FRONTEND_IMAGE_NAME }}"
+          echo "FRONTEND_AR_IMAGE=$FRONTEND_AR_IMAGE" >> "$GITHUB_ENV"
+
+          docker tag "$FRONTEND_GHCR:$VERSION" "$FRONTEND_AR_IMAGE:$VERSION"
+          docker push "$FRONTEND_AR_IMAGE:$VERSION"
 
       - name: Deploy frontend to Cloud Run
         run: |
-          gcloud run deploy mcp-frontend \
-            --image "$AR_FRONTEND_IMAGE:${{ github.sha }}" \
-            --region "${{ secrets.GCP_REGION }}" \
+          gcloud run deploy "${{ env.FRONTEND_SERVICE }}" \
+            --image "$FRONTEND_AR_IMAGE:$VERSION" \
+            --region "${{ env.REGION }}" \
             --platform managed \
             --allow-unauthenticated \
-            --port 80
+            --port 80 \
+            --quiet
