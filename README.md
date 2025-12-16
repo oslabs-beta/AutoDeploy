@@ -198,7 +198,7 @@ Adding this line to test the workflows
 Another test2
 test3
 test 4
-  // "build": "tsc -b && vite build",,
+  // "build": "tsc -b && vite build",,,
 
 Test
 ```
