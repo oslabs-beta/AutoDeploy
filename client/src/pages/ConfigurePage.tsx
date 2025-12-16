@@ -232,12 +232,12 @@ export default function ConfigurePage() {
           <section className="space-y-6 rounded-xl border bg-white/90 p-4 shadow-sm">
             {/* Template */}
             <label className="grid gap-1">
-              <span className="text-sm font-medium">Template</span>
+              <span className="text-sm font-medium text-slate-800">Template</span>
               <select
                 disabled={busy}
                 value={template}
                 onChange={(e) => setTemplate(e.target.value)}
-                className="rounded-md border px-3 py-2 text-sm"
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 disabled:bg-slate-100 disabled:text-slate-400"
               >
                 <option value="node_app">Node.js app</option>
                 <option value="node_library">Node.js library</option>
@@ -250,7 +250,7 @@ export default function ConfigurePage() {
 
             {/* Stages */}
             <fieldset className="space-y-2">
-              <legend className="text-sm font-medium">Enabled stages</legend>
+              <legend className="text-sm font-medium text-slate-800">Enabled stages</legend>
               <div className="flex flex-wrap gap-3">
                 {(["build", "test", "deploy"] as const).map((stage) => (
                   <label
@@ -273,7 +273,7 @@ export default function ConfigurePage() {
             {/* Node version + commands */}
             <div className="grid gap-4">
               <label className="grid gap-1">
-                <span className="text-sm font-medium">Node version</span>
+                <span className="text-sm font-medium text-slate-800">Node version</span>
                 <input
                   disabled={busy}
                   value={options.nodeVersion}
@@ -286,7 +286,7 @@ export default function ConfigurePage() {
               </label>
 
               <label className="grid gap-1">
-                <span className="text-sm font-medium">Install command</span>
+                <span className="text-sm font-medium text-slate-800">Install command</span>
                 <input
                   disabled={busy}
                   value={options.installCmd}
@@ -299,7 +299,7 @@ export default function ConfigurePage() {
               </label>
 
               <label className="grid gap-1">
-                <span className="text-sm font-medium">Test command</span>
+                <span className="text-sm font-medium text-slate-800">Test command</span>
                 <input
                   disabled={busy}
                   value={options.testCmd}
@@ -312,7 +312,7 @@ export default function ConfigurePage() {
               </label>
 
               <label className="grid gap-1">
-                <span className="text-sm font-medium">Build command</span>
+                <span className="text-sm font-medium text-slate-800">Build command</span>
                 <input
                   disabled={busy}
                   value={options.buildCmd}
@@ -327,12 +327,12 @@ export default function ConfigurePage() {
 
             {/* AWS Role */}
             <label className="grid gap-1">
-              <span className="text-sm font-medium">AWS Role (OIDC)</span>
+              <span className="text-sm font-medium text-slate-800">AWS Role (OIDC)</span>
               <select
                 disabled={busy || !roles.length}
                 value={options.awsRoleArn ?? ""}
                 onChange={(e) => setOption("awsRoleArn", e.target.value)}
-                className="rounded-md border px-3 py-2 text-sm bg-black text-white"
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 disabled:bg-slate-100 disabled:text-slate-400"
               >
                 <option value="">-- select --</option>
                 {roles.map((r) => (
@@ -385,7 +385,7 @@ export default function ConfigurePage() {
           <section className="flex flex-col rounded-xl border bg-white/90 p-4 shadow-sm">
             <div className="mb-3 flex items-center justify-between gap-2">
               <div>
-                <h2 className="text-sm font-medium">AI YAML wizard</h2>
+                <h2 className="text-sm font-medium text-slate-900">AI YAML wizard</h2>
                 <p className="text-xs text-slate-500">
                   Describe how you want your workflow to behave. I’ll suggest
                   envs, branches, caching, matrix builds, etc.
@@ -406,7 +406,7 @@ export default function ConfigurePage() {
                     className={`rounded-lg px-3 py-2 text-xs whitespace-pre-wrap ${
                       m.role === "user"
                         ? "bg-slate-900 text-white"
-                        : "bg-white text-slate-900 border border-slate-200"
+                        : "bg-white text-slate-900 border border-slate-300"
                     } max-w-[80%]`}
                   >
                     {m.content}
@@ -423,7 +423,7 @@ export default function ConfigurePage() {
             {/* Chat input */}
             <div className="mt-3 space-y-2">
               <textarea
-                className="w-full rounded-md border px-3 py-2 text-xs resize-none"
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 resize-none disabled:bg-slate-100 disabled:text-slate-400"
                 rows={3}
                 placeholder="E.g. I want this to run only on main and PRs, use Node 20, cache npm, and deploy to prod on tags starting with v*…"
                 value={chatInput}

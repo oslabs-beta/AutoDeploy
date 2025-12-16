@@ -13,13 +13,16 @@ export const github_adapter = {
       'commits',
       'workflows',
       'get_repo',
+      'contents',
+      'file',
     ]),
     repo: z.string().optional(),
     user_id: z.string(),
+    path: z.string().optional(),
     page: z.number().optional(),
     per_page: z.number().optional(),
   }),
-  handler: async ({ action, repo, user_id, page = 1, per_page = 50 }) => {
+  handler: async ({ action, repo, user_id, path, page = 1, per_page = 50 }) => {
     if (!user_id) {
       throw new Error('Missing user_id in adapter call');
     }
@@ -49,6 +52,22 @@ export const github_adapter = {
     }
 
     const accessToken = res.rows[0].access_token;
+
+    async function getDefaultBranch(repo) {
+      const res = await fetch(`https://api.github.com/repos/${repo}`, {
+        headers: {
+          Authorization: `token ${accessToken}`,
+          Accept: 'application/vnd.github.v3+json',
+          'User-Agent': 'AutoDeploy-App',
+        },
+      });
+
+      if (!res.ok) return 'main';
+
+      const data = await res.json();
+      return data.default_branch || 'main';
+    }
+
     let apiUrl;
 
     switch (action) {
@@ -79,6 +98,25 @@ export const github_adapter = {
           throw new Error("Missing 'repo' parameter for workflows action");
         apiUrl = `https://api.github.com/repos/${repo}/actions/workflows`;
         break;
+      case 'contents':
+      case 'file': {
+        if (!repo)
+          throw new Error("Missing 'repo' parameter for contents/file action");
+
+        const safePath = path ? `/${encodeURIComponent(path)}` : '';
+
+        // Always include ref when path is provided (GitHub API quirk for dot-directories)
+        if (path) {
+          const defaultBranch = await getDefaultBranch(repo);
+          apiUrl = `https://api.github.com/repos/${repo}/contents${safePath}?ref=${encodeURIComponent(
+            defaultBranch
+          )}`;
+        } else {
+          apiUrl = `https://api.github.com/repos/${repo}/contents`;
+        }
+
+        break;
+      }
       default:
         throw new Error(`Unsupported action: ${action}`);
     }
@@ -159,6 +197,39 @@ export const github_adapter = {
             state: wf.state,
             path: wf.path,
           })),
+        };
+
+      case 'contents':
+        return {
+          success: true,
+          contents: Array.isArray(data)
+            ? data.map((item) => ({
+                name: item.name,
+                path: item.path,
+                type: item.type,
+                size: item.size ?? null,
+              }))
+            : [],
+        };
+
+      case 'file':
+        if (data.type !== 'file') {
+          return {
+            success: false,
+            error: 'Requested path is not a file',
+          };
+        }
+
+        return {
+          success: true,
+          file: {
+            name: data.name,
+            path: data.path,
+            encoding: data.encoding,
+            content: data.content
+              ? Buffer.from(data.content, 'base64').toString('utf-8')
+              : null,
+          },
         };
 
       case 'info':

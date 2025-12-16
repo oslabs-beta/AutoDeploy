@@ -5,49 +5,6 @@ import fetch from "node-fetch";
 dotenv.config();
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// --- Intent extraction using LLM (structured, no regex routing) ---
-async function extractGitHubIntent(llmClient, userText) {
-  const intentPrompt = `
-You are an intent classifier for a GitHub automation agent.
-
-Return ONLY valid JSON. Do not explain anything.
-
-Valid intents:
-- list_repos
-- repo_info
-- list_root
-- list_path
-- check_file
-- check_dir
-- read_file
-- list_workflows
-- list_branches
-- list_commits
-
-Return JSON with exactly these fields:
-{
-  "intent": string,
-  "repo": string | null,
-  "path": string | null
-}
-
-User request:
-"${userText}"
-`;
-
-  const res = await llmClient.chat.completions.create({
-    model: "gpt-4o-mini",
-    messages: [{ role: "system", content: intentPrompt }],
-  });
-
-  try {
-    return JSON.parse(res.choices[0].message.content);
-  } catch (e) {
-    console.warn("⚠️ Failed to parse intent JSON, falling back to repo_info");
-    return { intent: "repo_info", repo: null, path: null };
-  }
-}
-
 // Helper: call MCP routes dynamically, with error handling
 async function callMCPTool(tool, input, cookie) {
   try {
@@ -415,72 +372,73 @@ Tell me what you’d like to do next.
       if (toolName === "github_adapter") {
         agentMeta.tool_called = "github_adapter";
 
-        // --- Structured intent extraction ---
-        const intentData = await extractGitHubIntent(client, userPromptText);
-        const { intent, repo: intentRepo, path: intentPath } = intentData;
-
-        const resolvedRepo = repo || intentRepo;
-
-        // 🔒 Path always implies filesystem, never GitHub Actions metadata
-        let normalizedIntent = intent;
-        if (intentPath && intent === "list_workflows") {
-          normalizedIntent = "list_path";
-        }
-
-        // Map intent → github_adapter action
-        let action;
+        // 🔎 Resolve github action explicitly (Option A)
+        let action = "info";
         let path;
 
-        switch (normalizedIntent) {
-          case "list_repos":
-            action = "repos";
-            break;
+        // --- Repo listing ---
+        if (/\b(repos|repositories)\b.*\b(available|list|show|have|exist)\b|\b(list|show|what|which)\b.*\b(repos|repositories)\b/i.test(userPromptText)) {
+          action = "repos";
+        }
+        // --- Repo contents (directories / existence checks) ---
+        else if (
+          /\b(contents|files|structure|directory|folder|root)\b/i.test(userPromptText) ||
+          /\b(list|show|view|browse|check)\b.*\b(root|files)\b/i.test(userPromptText)
+        ) {
+          action = "contents";
 
-          case "list_root":
-            action = "contents";
-            break;
+          // Extract optional path (e.g. "at server/", "in src/")
+          const pathMatch =
+            userPromptText.match(/\b(?:in|at)\s+([A-Za-z0-9_.\-\/]+)\b/i);
 
-          case "list_path":
-            action = "contents";
-            path = intentPath;
-            break;
+          path = pathMatch?.[1];
+        }
+        // --- Directory existence check ---
+        else if (/\b(is there|does .* have|check for|verify)\b.*\b([A-Za-z0-9_.\-\/]+\/[A-Za-z0-9_.\-\/]+)\b/i.test(userPromptText)) {
+          action = "contents";
 
-          case "check_dir":
-            action = "contents";
-            path = intentPath;
-            break;
+          const dirMatch =
+            userPromptText.match(/\b([A-Za-z0-9_.\-\/]+\/[A-Za-z0-9_.\-\/]+)\b/i);
 
-          case "check_file":
+          path = dirMatch?.[1];
+        }
+        // --- Generic file existence check (supports extensionless files) ---
+        else if (/\b(is there|does .* have|check for|verify)\b/i.test(userPromptText)) {
+          const fileMatch =
+            userPromptText.match(/\b(Dockerfile|Makefile|\.env|\.gitignore)\b/i) ||
+            userPromptText.match(/\b([A-Za-z0-9_.\-\/]+\.[A-Za-z0-9]+)\b/i);
+
+          if (fileMatch) {
             action = "file";
-            path = intentPath;
-            break;
+            path = fileMatch[1];
+          }
+        }
+        // --- File read ---
+        else if (/\b(read|get|open|show)\b.*\b(file|contents)\b/i.test(userPromptText)) {
+          action = "file";
 
-          case "read_file":
-            action = "file";
-            path = intentPath;
-            break;
+          const fileMatch =
+            userPromptText.match(/\b(?:file\s+)?([A-Za-z0-9_.\-\/]+\.[A-Za-z0-9]+)\b/i);
 
-          case "list_workflows":
-            action = "workflows";
-            break;
-
-          case "list_branches":
-            action = "branches";
-            break;
-
-          case "list_commits":
-            action = "commits";
-            break;
-
-          case "repo_info":
-          default:
-            action = "info";
-            break;
+          path = fileMatch?.[1];
+        }
+        // --- Repo metadata ---
+        else if (/branches/i.test(userPromptText)) {
+          action = "branches";
+        } else if (/commits/i.test(userPromptText)) {
+          action = "commits";
+        } else if (/workflows/i.test(userPromptText)) {
+          action = "workflows";
         }
 
-        // Repos listing does not require repo
+        // 🔹 List repos does NOT require a repo
         if (action === "repos") {
-          const output = await callMCPTool("github_adapter", { action }, cookie);
+          const output = await callMCPTool(
+            "github_adapter",
+            { action },
+            cookie
+          );
+
           return {
             success: true,
             agent_decision: agentMeta.agent_decision,
@@ -489,18 +447,23 @@ Tell me what you’d like to do next.
           };
         }
 
-        // All other actions require a repo
-        if (!resolvedRepo) {
+        // 🔹 All other github actions REQUIRE a repo
+        if (!repo) {
           return {
             success: false,
-            error: "Please specify a repository (e.g. 'user/repo')."
+            error: "Please specify a repository (e.g. 'tell me about user/repo')."
           };
         }
 
-        const payload = { action, repo: resolvedRepo };
+        // Only include path if it exists
+        const payload = { action, repo };
         if (path) payload.path = path;
 
-        const output = await callMCPTool("github_adapter", payload, cookie);
+        const output = await callMCPTool(
+          "github_adapter",
+          payload,
+          cookie
+        );
 
         return {
           success: true,
