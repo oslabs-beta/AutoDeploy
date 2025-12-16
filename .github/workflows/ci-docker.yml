@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - lorenc-ci
+      - lorenc-cicd
       - paython-mcp
       - feature/configure-chat-ui
   pull_request:
