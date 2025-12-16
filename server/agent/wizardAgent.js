@@ -1,25 +1,47 @@
-import OpenAI from "openai";
-import dotenv from "dotenv";
-import fetch from "node-fetch";
+import OpenAI from 'openai';
+import dotenv from 'dotenv';
+import fetch from 'node-fetch';
 
 dotenv.config();
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// Added by Lorenc
+// Lazily create the OpenAI client so the server can boot even if OPENAI_API_KEY is missing.
+// We only require the key when the wizard agent actually needs to call OpenAI.
+let _openaiClient = null;
+function getOpenAIClient() {
+  if (_openaiClient) return _openaiClient;
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      'OPENAI_API_KEY is missing. Set it as an environment variable (e.g., in Cloud Run) to use the wizard agent.'
+    );
+  }
+
+  _openaiClient = new OpenAI({ apiKey });
+  return _openaiClient;
+}
+// -----------------------
 
 // Helper: call MCP routes dynamically, with error handling
 async function callMCPTool(tool, input, cookie) {
   try {
     const response = await fetch(`http://localhost:3000/mcp/v1/${tool}`, {
-      method: "POST",
+      method: 'POST',
       headers: {
-        "Content-Type": "application/json",
-        "Cookie": cookie || (process.env.MCP_SESSION_TOKEN ? `mcp_session=${process.env.MCP_SESSION_TOKEN}` : ""),
+        'Content-Type': 'application/json',
+        Cookie:
+          cookie ||
+          (process.env.MCP_SESSION_TOKEN
+            ? `mcp_session=${process.env.MCP_SESSION_TOKEN}`
+            : ''),
       },
       body: JSON.stringify(input),
     });
     return await response.json();
   } catch (err) {
-    console.warn("⚠️ MCP call failed:", err.message || err);
-    return { error: "MCP server unreachable" };
+    console.warn('⚠️ MCP call failed:', err.message || err);
+    return { error: 'MCP server unreachable' };
   }
 }
 
@@ -27,7 +49,7 @@ async function callMCPTool(tool, input, cookie) {
 export async function runWizardAgent(userPrompt) {
   // Normalize userPrompt into a consistent text form + extract cookie
   const userPromptText =
-    typeof userPrompt === "string"
+    typeof userPrompt === 'string'
       ? userPrompt
       : userPrompt?.content ||
         userPrompt?.message ||
@@ -35,19 +57,20 @@ export async function runWizardAgent(userPrompt) {
         userPrompt?.body?.content ||
         userPrompt?.body?.message ||
         userPrompt?.body?.prompt ||
-        "";
+        '';
 
   // Guard: prevent empty or meaningless prompts from reaching the LLM
   if (!userPromptText || userPromptText.trim().length < 3) {
     return {
       success: false,
-      agent_decision: "Your message was too short or empty. Please provide more detail, such as 'list my repos' or 'tell me about user/repo'.",
+      agent_decision:
+        "Your message was too short or empty. Please provide more detail, such as 'list my repos' or 'tell me about user/repo'.",
       tool_called: null,
-      message: "Please provide a more descriptive request."
+      message: 'Please provide a more descriptive request.',
     };
   }
 
-  const cookie = userPrompt?.cookie || "";
+  const cookie = userPrompt?.cookie || '';
   const systemPrompt = `
   You are the MCP Wizard Agent.
   You have full access to the following connected tools and APIs:
@@ -74,23 +97,40 @@ export async function runWizardAgent(userPrompt) {
   When selecting or generating a pipeline template, you MUST return one of these exact values.
   Never invent new template names. If unsure, default to "node_app".
   `;
+  // Added by Lorenc
+  let client;
+  try {
+    client = getOpenAIClient();
+  } catch (e) {
+    // Important: do not crash the whole server/container if OpenAI isn't configured.
+    return {
+      success: false,
+      agent_decision: 'OpenAI not configured',
+      tool_called: null,
+      message: e?.message || 'OPENAI_API_KEY is missing.',
+    };
+  }
+  //--------------
 
   const completion = await client.chat.completions.create({
-    model: "gpt-4o-mini",
+    model: 'gpt-4o-mini',
     messages: [
-{ role: "system", content: systemPrompt },
-{
-  role: "user",
-  content:
-    typeof userPrompt === "string"
-      ? userPrompt
-      : userPrompt?.content || userPrompt?.message ||userPrompt?.prompt || ""
-},
+      { role: 'system', content: systemPrompt },
+      {
+        role: 'user',
+        content:
+          typeof userPrompt === 'string'
+            ? userPrompt
+            : userPrompt?.content ||
+              userPrompt?.message ||
+              userPrompt?.prompt ||
+              '',
+      },
     ],
   });
 
   const decision = completion.choices[0].message.content;
-  console.log("\n🤖 Agent decided:", decision);
+  console.log('\n🤖 Agent decided:', decision);
 
   let agentMeta = {
     agent_decision: decision,
@@ -101,7 +141,8 @@ export async function runWizardAgent(userPrompt) {
   const toolMap = {
     repo_reader: /\b(list repos|list repositories|repositories|repo_reader)\b/i,
     pipeline_generator: /\bpipeline\b/i,
-    pipeline_commit: /\b(yes commit|commit (the )?(pipeline|workflow|file)|apply (the )?(pipeline|workflow)|save (the )?(pipeline|workflow)|push (the )?(pipeline|workflow))\b/i,
+    pipeline_commit:
+      /\b(yes commit|commit (the )?(pipeline|workflow|file)|apply (the )?(pipeline|workflow)|save (the )?(pipeline|workflow)|push (the )?(pipeline|workflow))\b/i,
     oidc_adapter: /\b(role|jenkins)\b/i,
     github_adapter: /\b(github|repo info|repository|[\w-]+\/[\w-]+)\b/i,
   };
@@ -112,54 +153,77 @@ export async function runWizardAgent(userPrompt) {
 
       // --- Extract context dynamically from userPrompt or decision ---
       // Prefer explicit labels like: "repo owner/name", "template node_app", "provider aws"
-      const labeledRepo = userPromptText.match(/\brepo\s+([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/i) 
-                       || decision.match(/\brepo\s+([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/i);
-      const genericRepo = (userPromptText + " " + decision).match(/\b(?!ci\/cd\b)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/);
-      const repo = (labeledRepo?.[1] || genericRepo?.[1] || null);
+      const labeledRepo =
+        userPromptText.match(
+          /\brepo\s+([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/i
+        ) || decision.match(/\brepo\s+([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/i);
+      const genericRepo = (userPromptText + ' ' + decision).match(
+        /\b(?!ci\/cd\b)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/
+      );
+      const repo = labeledRepo?.[1] || genericRepo?.[1] || null;
 
-      const labeledProvider = userPromptText.match(/\bprovider\s+(aws|jenkins|gcp|azure)\b/i) 
-                           || decision.match(/\bprovider\s+(aws|jenkins|gcp|azure)\b/i);
-      const genericProvider = userPromptText.match(/\b(aws|jenkins|github actions|gcp|azure)\b/i) 
-                           || decision.match(/\b(aws|jenkins|github actions|gcp|azure)\b/i);
-      const provider = (labeledProvider?.[1] || genericProvider?.[1] || null)?.toLowerCase().replace(/\s+/g, ' ');
+      const labeledProvider =
+        userPromptText.match(/\bprovider\s+(aws|jenkins|gcp|azure)\b/i) ||
+        decision.match(/\bprovider\s+(aws|jenkins|gcp|azure)\b/i);
+      const genericProvider =
+        userPromptText.match(/\b(aws|jenkins|github actions|gcp|azure)\b/i) ||
+        decision.match(/\b(aws|jenkins|github actions|gcp|azure)\b/i);
+      const provider = (labeledProvider?.[1] || genericProvider?.[1] || null)
+        ?.toLowerCase()
+        .replace(/\s+/g, ' ');
 
-      const labeledTemplate = userPromptText.match(/\btemplate\s+([a-z_][a-z0-9_]+)\b/i) 
-                           || decision.match(/\btemplate\s+([a-z_][a-z0-9_]+)\b/i);
-      const genericTemplate = userPromptText.match(/\b(node_app|python_app|container_service|node|python|react|express|django|flask|java|go)\b/i) 
-                           || decision.match(/\b(node_app|python_app|container_service|node|python|react|express|django|flask|java|go)\b/i);
-      const template = (labeledTemplate?.[1] || genericTemplate?.[1] || null)?.toLowerCase();
+      const labeledTemplate =
+        userPromptText.match(/\btemplate\s+([a-z_][a-z0-9_]+)\b/i) ||
+        decision.match(/\btemplate\s+([a-z_][a-z0-9_]+)\b/i);
+      const genericTemplate =
+        userPromptText.match(
+          /\b(node_app|python_app|container_service|node|python|react|express|django|flask|java|go)\b/i
+        ) ||
+        decision.match(
+          /\b(node_app|python_app|container_service|node|python|react|express|django|flask|java|go)\b/i
+        );
+      const template = (
+        labeledTemplate?.[1] ||
+        genericTemplate?.[1] ||
+        null
+      )?.toLowerCase();
 
-      if (toolName === "repo_reader") {
+      if (toolName === 'repo_reader') {
         // Extract optional username, user_id, and repo info
-        const usernameMatch = userPromptText.match(/\busername[:=]?\s*([\w-]+)\b/i);
-        const userIdMatch = userPromptText.match(/\buser[_ ]?id[:=]?\s*([\w-]+)\b/i);
+        const usernameMatch = userPromptText.match(
+          /\busername[:=]?\s*([\w-]+)\b/i
+        );
+        const userIdMatch = userPromptText.match(
+          /\buser[_ ]?id[:=]?\s*([\w-]+)\b/i
+        );
         const repoMatch = userPromptText.match(/\b([\w-]+\/[\w-]+)\b/);
 
         const payload = {};
         if (usernameMatch) payload.username = usernameMatch[1];
         if (userIdMatch) payload.user_id = userIdMatch[1];
         if (repoMatch) {
-          const [username, repo] = repoMatch[1].split("/");
+          const [username, repo] = repoMatch[1].split('/');
           payload.username = username;
           payload.repo = `${username}/${repo}`;
         }
 
-        agentMeta.tool_called = "repo_reader";
-        const output = await callMCPTool("repo_reader", payload, cookie);
+        agentMeta.tool_called = 'repo_reader';
+        const output = await callMCPTool('repo_reader', payload, cookie);
         return {
           success: true,
           agent_decision: agentMeta.agent_decision,
           tool_called: agentMeta.tool_called,
-          tool_output: output
+          tool_output: output,
         };
       }
 
-      if (toolName === "pipeline_generator") {
+      if (toolName === 'pipeline_generator') {
         if (!repo) {
-          console.warn("⚠️ Missing repo context for pipeline generation.");
-          return { 
-            success: false, 
-            error: "I couldn’t determine which repository you meant. Please specify it, e.g., 'generate pipeline for user/repo'." 
+          console.warn('⚠️ Missing repo context for pipeline generation.');
+          return {
+            success: false,
+            error:
+              "I couldn’t determine which repository you meant. Please specify it, e.g., 'generate pipeline for user/repo'.",
           };
         }
 
@@ -170,41 +234,66 @@ export async function runWizardAgent(userPrompt) {
         // Fetch GitHub repo details before pipeline generation
         let repoInfo = null;
         try {
-          const info = await callMCPTool("github_adapter", { action: "info", repo }, cookie);
+          const info = await callMCPTool(
+            'github_adapter',
+            { action: 'info', repo },
+            cookie
+          );
           if (info?.data?.success) {
             repoInfo = info.data;
             console.log(`📦 Retrieved repo info from GitHub:`, repoInfo);
           }
         } catch (err) {
-          console.warn("⚠️ Failed to fetch GitHub info before pipeline generation:", err.message);
+          console.warn(
+            '⚠️ Failed to fetch GitHub info before pipeline generation:',
+            err.message
+          );
         }
 
         // Merge language or visibility into payload if available
-        if (repoInfo?.language && !payload.language) payload.language = repoInfo.language.toLowerCase();
-        if (repoInfo?.visibility && !payload.visibility) payload.visibility = repoInfo.visibility;
+        if (repoInfo?.language && !payload.language)
+          payload.language = repoInfo.language.toLowerCase();
+        if (repoInfo?.visibility && !payload.visibility)
+          payload.visibility = repoInfo.visibility;
 
         // Infer template if still missing
         if (!payload.template) {
-          if (repoInfo?.language?.toLowerCase().includes("javascript") || repoInfo?.language?.toLowerCase().includes("typescript") || /js|ts|node|javascript/i.test(repo)) {
-            payload.template = "node_app";
-          } else if (repoInfo?.language?.toLowerCase().includes("python") || /py|flask|django/i.test(repo)) {
-            payload.template = "python_app";
+          if (
+            repoInfo?.language?.toLowerCase().includes('javascript') ||
+            repoInfo?.language?.toLowerCase().includes('typescript') ||
+            /js|ts|node|javascript/i.test(repo)
+          ) {
+            payload.template = 'node_app';
+          } else if (
+            repoInfo?.language?.toLowerCase().includes('python') ||
+            /py|flask|django/i.test(repo)
+          ) {
+            payload.template = 'python_app';
           } else {
-            payload.template = "container_service";
+            payload.template = 'container_service';
           }
           console.log(`🪄 Inferred template: ${payload.template}`);
         }
 
         // --- Auto-correct short template names ---
-        if (payload.template === "node") payload.template = "node_app";
-        if (payload.template === "python") payload.template = "python_app";
-        if (payload.template === "container") payload.template = "container_service";
+        if (payload.template === 'node') payload.template = 'node_app';
+        if (payload.template === 'python') payload.template = 'python_app';
+        if (payload.template === 'container')
+          payload.template = 'container_service';
 
         // --- Validate template against allowed values ---
-        const allowedTemplates = ["node_app", "python_app", "container_service"];
+        const allowedTemplates = [
+          'node_app',
+          'python_app',
+          'container_service',
+        ];
         if (!allowedTemplates.includes(payload.template)) {
-          console.warn("⚠ Invalid template inferred:", payload.template, "— auto-correcting to node_app.");
-          payload.template = "node_app";
+          console.warn(
+            '⚠ Invalid template inferred:',
+            payload.template,
+            '— auto-correcting to node_app.'
+          );
+          payload.template = 'node_app';
         }
 
         // --- Preserve repo context globally ---
@@ -215,15 +304,19 @@ export async function runWizardAgent(userPrompt) {
         }
 
         // ✅ Ensure provider is valid before sending payload
-        if (!payload.provider || !["aws", "jenkins"].includes(payload.provider)) {
+        if (
+          !payload.provider ||
+          !['aws', 'jenkins'].includes(payload.provider)
+        ) {
           // Infer from repo visibility or fallback to AWS
-          payload.provider = repoInfo?.visibility === "private" ? "jenkins" : "aws";
+          payload.provider =
+            repoInfo?.visibility === 'private' ? 'jenkins' : 'aws';
           console.log(`🧭 Inferred provider: ${payload.provider}`);
         }
 
-        console.log("🧩 Final payload to pipeline_generator:", payload);
-        agentMeta.tool_called = "pipeline_generator";
-        const output = await callMCPTool("pipeline_generator", payload, cookie);
+        console.log('🧩 Final payload to pipeline_generator:', payload);
+        agentMeta.tool_called = 'pipeline_generator';
+        const output = await callMCPTool('pipeline_generator', payload, cookie);
 
         // Extract YAML for confirmation step
         const generatedYaml =
@@ -238,37 +331,49 @@ export async function runWizardAgent(userPrompt) {
         return {
           success: true,
           requires_confirmation: true,
-          message: "A pipeline has been generated. Would you like me to commit this workflow file to your repository?",
+          message:
+            'A pipeline has been generated. Would you like me to commit this workflow file to your repository?',
           agent_decision: agentMeta.agent_decision,
           tool_called: agentMeta.tool_called,
           generated_yaml: generatedYaml,
-          pipeline_metadata: output
+          pipeline_metadata: output,
         };
       }
 
-      if (toolName === "pipeline_commit") {
-        console.log("📝 Commit intent detected.");
+      if (toolName === 'pipeline_commit') {
+        console.log('📝 Commit intent detected.');
 
         // ❗ Guard: Prevent confusing "repo commit history" with "pipeline commit"
-        if (/recent commits|commit history|see commits|show commits|view commits/i.test(decision + " " + userPromptText)) {
-          console.log("⚠ Not pipeline commit. Detected intention to view repo commit history.");
-          agentMeta.tool_called = "github_adapter";
+        if (
+          /recent commits|commit history|see commits|show commits|view commits/i.test(
+            decision + ' ' + userPromptText
+          )
+        ) {
+          console.log(
+            '⚠ Not pipeline commit. Detected intention to view repo commit history.'
+          );
+          agentMeta.tool_called = 'github_adapter';
 
           const repoForCommits = repo || globalThis.LAST_REPO_USED;
           if (!repoForCommits) {
             return {
               success: false,
-              error: "Please specify a repository, e.g. 'show commits for user/repo'."
+              error:
+                "Please specify a repository, e.g. 'show commits for user/repo'.",
             };
           }
 
-          const output = await callMCPTool("github_adapter", { action: "commits", repo: repoForCommits }, cookie);
+          const output = await callMCPTool(
+            'github_adapter',
+            { action: 'commits', repo: repoForCommits },
+            cookie
+          );
 
           return {
             success: true,
             agent_decision: agentMeta.agent_decision,
             tool_called: agentMeta.tool_called,
-            tool_output: output
+            tool_output: output,
           };
         }
 
@@ -277,7 +382,8 @@ export async function runWizardAgent(userPrompt) {
         if (!commitRepo) {
           return {
             success: false,
-            error: "I don’t know which repository to commit to. Please specify the repo (e.g., 'commit to user/repo')."
+            error:
+              "I don’t know which repository to commit to. Please specify the repo (e.g., 'commit to user/repo').",
           };
         }
 
@@ -285,15 +391,13 @@ export async function runWizardAgent(userPrompt) {
         const yamlMatch = userPromptText.match(/```yaml([\s\S]*?)```/i);
         const yamlFromPrompt = yamlMatch ? yamlMatch[1].trim() : null;
 
-        const yaml =
-          yamlFromPrompt ||
-          globalThis.LAST_GENERATED_YAML ||
-          null;
+        const yaml = yamlFromPrompt || globalThis.LAST_GENERATED_YAML || null;
 
         if (!yaml) {
           return {
             success: false,
-            error: "I don’t have a pipeline YAML to commit. Please generate one first."
+            error:
+              'I don’t have a pipeline YAML to commit. Please generate one first.',
           };
         }
 
@@ -303,50 +407,55 @@ export async function runWizardAgent(userPrompt) {
         const commitPayload = {
           repoFullName: commitRepo,
           yaml,
-          branch: "main",
-          path: ".github/workflows/ci.yml"
+          branch: 'main',
+          path: '.github/workflows/ci.yml',
         };
 
-        agentMeta.tool_called = "pipeline_commit";
-        const output = await callMCPTool("pipeline_commit", commitPayload, cookie);
+        agentMeta.tool_called = 'pipeline_commit';
+        const output = await callMCPTool(
+          'pipeline_commit',
+          commitPayload,
+          cookie
+        );
 
         return {
           success: true,
           agent_decision: agentMeta.agent_decision,
           tool_called: agentMeta.tool_called,
           committed_repo: commitRepo,
-          committed_path: ".github/workflows/ci.yml",
-          tool_output: output
+          committed_path: '.github/workflows/ci.yml',
+          tool_output: output,
         };
       }
 
-      if (toolName === "oidc_adapter") {
+      if (toolName === 'oidc_adapter') {
         const payload = provider ? { provider } : {};
-        agentMeta.tool_called = "oidc_adapter";
-        const output = await callMCPTool("oidc_adapter", payload, cookie);
+        agentMeta.tool_called = 'oidc_adapter';
+        const output = await callMCPTool('oidc_adapter', payload, cookie);
         return {
           success: true,
           agent_decision: agentMeta.agent_decision,
           tool_called: agentMeta.tool_called,
-          tool_output: output
+          tool_output: output,
         };
       }
 
-      if (toolName === "github_adapter") {
+      if (toolName === 'github_adapter') {
         if (repo) {
-          agentMeta.tool_called = "github_adapter";
-          const output = await callMCPTool("github/info", { repo }, cookie);
+          agentMeta.tool_called = 'github_adapter';
+          const output = await callMCPTool('github/info', { repo }, cookie);
           return {
             success: true,
             agent_decision: agentMeta.agent_decision,
             tool_called: agentMeta.tool_called,
-            tool_output: output
+            tool_output: output,
           };
         } else {
-          console.warn("⚠️ Missing repo for GitHub info retrieval.");
-          return { 
-            success: false, 
-            error: "Couldn’t determine which repository to fetch. Please include it in your request (e.g., 'tell me about user/repo')." 
+          console.warn('⚠️ Missing repo for GitHub info retrieval.');
+          return {
+            success: false,
+            error:
+              "Couldn’t determine which repository to fetch. Please include it in your request (e.g., 'tell me about user/repo').",
           };
         }
       }
@@ -357,16 +466,17 @@ export async function runWizardAgent(userPrompt) {
     success: false,
     agent_decision: agentMeta.agent_decision,
     tool_called: null,
-    message: "No matching tool found. Try asking about a repo, pipeline, or AWS role."
+    message:
+      'No matching tool found. Try asking about a repo, pipeline, or AWS role.',
   };
 }
 
 // Example local test (can comment out for production)
 if (process.argv[2]) {
-  const input = process.argv.slice(2).join(" ");
+  const input = process.argv.slice(2).join(' ');
   runWizardAgent(input)
     .then((res) => {
-      console.log("\n📦 Tool Output:\n", JSON.stringify(res, null, 2));
+      console.log('\n📦 Tool Output:\n', JSON.stringify(res, null, 2));
     })
     .catch(console.error);
 }
