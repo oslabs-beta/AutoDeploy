@@ -48,13 +48,6 @@ export const pipeline_generator = {
       stages: options?.stages,
     };
 
-  handler: async ({
-    repo,
-    branch = 'main',
-    provider = 'aws',
-    template,
-    options,
-  }) => {
     const sessionToken = process.env.MCP_SESSION_TOKEN;
     let decoded = {};
     let userId = null;
