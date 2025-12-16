@@ -1,4 +1,6 @@
 import { github_adapter } from './github_adapter.js';
+// Importing GCP adapter
+import { gcp_adapter } from './gcp_adapter.js';
 
 import { pool } from '../db.js';
 
@@ -15,7 +17,7 @@ export const pipeline_generator = {
   input_schema: z.object({
     repo: z.string(),
     branch: z.string().default('main'),
-    provider: z.enum(['aws', 'jenkins']).optional().default('aws'),
+    provider: z.enum(['aws', 'jenkins', 'gcp']).optional().default('aws'), // Update the provider to include 'gcp'
     template: z.enum(['node_app', 'python_app', 'container_service']),
     options: z
       .object({
@@ -46,12 +48,21 @@ export const pipeline_generator = {
       stages: options?.stages,
     };
 
+  handler: async ({
+    repo,
+    branch = 'main',
+    provider = 'aws',
+    template,
+    options,
+  }) => {
     const sessionToken = process.env.MCP_SESSION_TOKEN;
     let decoded = {};
     let userId = null;
 
     // No req.cookies available in MCP tool mode — skip direct session lookups.
-    console.warn('⚠️ Skipping requireSession — tool is running without HTTP request context.');
+    console.warn(
+      '⚠️ Skipping requireSession — tool is running without HTTP request context.'
+    );
 
     // Fallback: decode MCP_SESSION_TOKEN if no user found
     if (!userId && sessionToken) {
@@ -247,6 +258,43 @@ export const pipeline_generator = {
     console.log('🧪 pipeline_generator normalized options:', normalized);
 
     const pipelineName = `${selectedProvider}-${selectedTemplate}-ci.yml`;
+
+    // GCP path: generate a real Cloud Run workflow (GHCR -> Artifact Registry -> Cloud Run)
+    // What this does:
+    // If provider is gcp, we stop using the mock YAML
+    // We generate a real Cloud Run pipeline from your new adapter
+    // We return it in the same response shape the app already expects
+
+    if (selectedProvider === 'gcp') {
+      const gcpResult = await gcp_adapter.handler({
+        repo,
+        branch,
+        ...(options || {}),
+      });
+
+      if (!gcpResult?.success) {
+        return {
+          success: false,
+          error: gcpResult?.error || 'Failed to generate GCP pipeline YAML.',
+        };
+      }
+
+      return {
+        success: true,
+        data: {
+          pipeline_name: 'gcp-cloud-run-ci.yml',
+          repo,
+          branch,
+          provider: 'gcp',
+          template: selectedTemplate,
+          options: options || {},
+          stages: ['build', 'deploy'],
+          generated_yaml: gcpResult.data.generated_yaml,
+          repo_info: repoInfo,
+          created_at: new Date().toISOString(),
+        },
+      };
+    }
 
     const generated_yaml = `
 name: CI/CD Pipeline for ${repo}

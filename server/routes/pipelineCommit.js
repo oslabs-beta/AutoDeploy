@@ -7,6 +7,25 @@ import { savePipelineVersion } from '../lib/pipelineVersions.js';
 
 const router = Router();
 
+// Helper to normalize repoUrl | repoFullName
+function normalizeRepo(repoUrlSlug) {
+  if (repoUrlSlug && !repoUrlSlug.startsWith('http')) return repoUrlSlug;
+
+  const url = new URL(repoUrlSlug);
+  const parts = url.pathname
+    .replace(/^\//, '')
+    .replace(/\.git$/, '')
+    .split('/');
+
+  if (!parts || !parts[1]) {
+    throw new Error(
+      'Invalid repoUrl format. Expected https://github.com/<owner>/<repo>'
+    );
+  }
+
+  return `${parts[0]}/${parts[1]}`;
+}
+
 /**
  * POST /mcp/v1/pipeline_commit
  * Body:
@@ -21,11 +40,35 @@ const router = Router();
 // Commit a workflow YAML file to GitHub and record a new pipeline version
 router.post('/pipeline_commit', requireSession, async (req, res) => {
   try {
-    const { repoFullName, branch, yaml, path } = req.body || {};
-    if (!repoFullName || !yaml) {
-      return res
-        .status(400)
-        .json({ error: 'repoFullName and yaml are required' });
+    const {
+      repoFullName,
+      repoUrl,
+      branch = 'main',
+      yaml,
+      path,
+      provider = 'gcp',
+      workflowName,
+      message,
+    } = req.body || {};
+
+    // if (!repoFullName || !yaml) {
+    //   return res
+    //     .status(400)
+    //     .json({ error: 'repoFullName and yaml are required' });
+    // }
+
+    if (!repoFullName && !repoUrl) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Missing required field: repoFullName or repoUrl',
+      });
+    }
+
+    if (!yaml) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Missing required field: yaml',
+      });
     }
 
     const userId = req.user?.user_id;
@@ -36,13 +79,35 @@ router.post('/pipeline_commit', requireSession, async (req, res) => {
     if (!token)
       return res.status(401).json({ error: 'Missing GitHub token for user' });
 
-    const [owner, repo] = repoFullName.split('/');
-    const workflowPath = path || '.github/workflows/ci.yml';
+    // const [owner, repo] = repoFullName.split('/');
+    let normalizedRepoFullName;
+
+    try {
+      normalizedRepoFullName = normalizeRepo(repoFullName || repoUrl);
+    } catch (e) {
+      return res.status(400).json({ ok: false, error: e.message });
+    }
+
+    const [owner, repo] = normalizedRepoFullName.split('/');
+
+    // const workflowPath = path || '.github/workflows/ci.yml';
+    const defaultWorkflowName =
+      workflowName || (provider === 'gcp' ? 'gcp-cloud-run-ci.yml' : 'ci.yml');
+
+    const workflowPath = path || `.github/workflows/${defaultWorkflowName}`;
+
     const branchName = branch || 'main';
 
     console.log(
-      `[pipeline_commit] Committing workflow to ${repoFullName}:${workflowPath}`
+      `[pipeline_commit] Committing workflow to ${normalizedRepoFullName}:${workflowPath}`
     );
+
+    // Commit message
+    const commitMessage =
+      message ||
+      (provider === 'gcp'
+        ? 'Add GCP Cloud Run CI/CD workflow (GHCR -> Artifact Registry -> Cloud Run)'
+        : 'Add CI workflow via OSP');
 
     const result = await upsertWorkflowFile({
       token,
@@ -51,7 +116,7 @@ router.post('/pipeline_commit', requireSession, async (req, res) => {
       path: workflowPath,
       content: yaml,
       branch: branchName,
-      message: 'Add CI workflow via OSP',
+      message: commitMessage,
     });
 
     await query(
@@ -65,7 +130,8 @@ router.post('/pipeline_commit', requireSession, async (req, res) => {
       [
         userId,
         'github_actions',
-        repoFullName,
+        // repoFullName,
+        normalizedRepoFullName,
         'global',
         branchName,
         'pipeline_commit',
@@ -83,7 +149,7 @@ router.post('/pipeline_commit', requireSession, async (req, res) => {
     // Save a version of the pipelin YAML for history
     await savePipelineVersion({
       userId,
-      repoFullName,
+      repoFullName: normalizedRepoFullName,
       branch: branchName,
       workflowPath,
       yaml,
