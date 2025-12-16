@@ -144,4 +144,4 @@ app.use((err, _req, res, _next) => {
 });
 
 const port = process.env.PORT || 3000;
-app.listen(port, () => console.log(`API on http://localhost:${port}`));
+app.listen(port, '0.0.0.0', () => console.log(`Listening on port: ${port}`));
