@@ -19,7 +19,7 @@ function formatDate(iso: string) {
 }
 
 export default function DashboardPage() {
-  const { repo } = useRepoStore();
+  const { repo, branch: selectedBranch } = useRepoStore();
   const { result, setResultYaml } = usePipelineStore();
   const cfg = useConfigStore();
 
@@ -36,7 +36,8 @@ export default function DashboardPage() {
   }, [clear]);
 
   const repoFullName = result?.repo || repo || "";
-  const branch = (result as any)?.branch || "main";
+  const branchName =
+    (result as any)?.branch || selectedBranch || "main";
 
   const [versions, setVersions] = useState<PipelineVersion[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -65,7 +66,7 @@ export default function DashboardPage() {
       try {
         const rows = await api.getPipelineHistory({
           repoFullName,
-          branch,
+          branch: branchName,
           limit: 20,
         });
         if (!cancelled) {
@@ -87,11 +88,11 @@ export default function DashboardPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoFullName, branch]);
+  }, [repoFullName, branchName]);
 
   async function handleRollback(version: PipelineVersion) {
     if (!version?.id) return;
-    const confirmMsg = `Rollback ${repoFullName}@${branch} to version created at ${formatDate(
+    const confirmMsg = `Rollback ${repoFullName}@${branchName} to version created at ${formatDate(
       version.created_at
     )}?`;
     if (!window.confirm(confirmMsg)) return;
@@ -119,7 +120,7 @@ export default function DashboardPage() {
   function handleCommitClick() {
     const repoFullNameLocal = result?.repo || repo;
     const yaml = result?.generated_yaml;
-    const branchLocal = result?.branch || "main";
+    const branchLocal = (result as any)?.branch || branchName || "main";
     const environment = cfg.env || "dev";
     const provider = "aws";
     const path = `.github/workflows/${environment}-deploy.yml`;
@@ -146,7 +147,7 @@ export default function DashboardPage() {
           <h1 className="text-2xl font-semibold">Pipeline Dashboard</h1>
           {repoFullName ? (
             <p className="text-sm text-muted-foreground">
-              {repoFullName} @ <span className="font-mono">{branch}</span>
+                  {repoFullName} @ <span className="font-mono">{branchName}</span>
             </p>
           ) : (
             <p className="text-sm text-orange-600">

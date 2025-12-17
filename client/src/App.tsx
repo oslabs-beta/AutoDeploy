@@ -4,7 +4,6 @@ import ConnectPage from "./pages/ConnectPage";
 import ConfigurePage from "./pages/ConfigurePage";
 import SecretsPage from "./pages/SecretsPage";
 import DashboardPage from "./pages/DashboardPage";
-import Jenkins from "./routes/Jenkins";
 import { useRepoStore } from "./store/useRepoStore";
 import { usePipelineStore } from "./store/usePipelineStore";
 
@@ -56,7 +55,6 @@ export default function App() {
               <NavLink to="/configure">2 Configure</NavLink>
               <NavLink to="/secrets">3 Secrets</NavLink>
               <NavLink to="/dashboard">4 Dashboard</NavLink>
-              <NavLink to="/jenkins">5 Jenkins</NavLink>
             </nav>
           </header>
 
@@ -90,7 +88,6 @@ export default function App() {
                   </NeedRepo>
                 }
               />
-              <Route path="/jenkins" element={<Jenkins />} />
             </Routes>
           </main>
         </BrowserRouter>

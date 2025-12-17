@@ -1,3 +1,5 @@
+import { usePipelineStore } from "../store/usePipelineStore";
+
 // In dev: talk to Vite dev server proxy at /api
 // In prod: use the real backend URL from VITE_API_BASE (e.g. https://api.autodeploy.app)
 const DEFAULT_API_BASE =
