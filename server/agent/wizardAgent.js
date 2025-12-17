@@ -135,6 +135,10 @@ Tell me what you’d like to do next.
   }
 
   const cookie = userPrompt?.cookie || '';
+  const pipelineSnapshot =
+    userPrompt?.pipelineSnapshot ||
+    userPrompt?.body?.pipelineSnapshot ||
+    null;
   const systemPrompt = `
   You are the MCP Wizard Agent.
   You have full access to the following connected tools and APIs:
@@ -142,6 +146,7 @@ Tell me what you’d like to do next.
   - pipeline_generator: generates CI/CD YAMLs
   - oidc_adapter: lists AWS roles or Jenkins jobs
   - github_adapter: fetches real-time GitHub repository data through an authenticated API connection
+  - gcp_adapter: fetches Google Cloud information
   Do not say that you lack access to GitHub or external data — you can retrieve this information directly through the available tools.
   Only call tools when the user explicitly asks for data retrieval or actions. Do NOT call tools for explanations, help, or capability questions.
 
@@ -310,6 +315,17 @@ Tell me what you’d like to do next.
         const payload = { repo };
         if (provider) payload.provider = provider;
         if (template) payload.template = template;
+
+        // 🔑 Inject authoritative pipeline options from the frontend (Option A)
+        if (pipelineSnapshot?.options) {
+          payload.options = pipelineSnapshot.options;
+        }
+        if (pipelineSnapshot?.stages) {
+          payload.stages = pipelineSnapshot.stages;
+        }
+        if (pipelineSnapshot?.branch) {
+          payload.branch = pipelineSnapshot.branch;
+        }
 
         // Fetch GitHub repo details before pipeline generation
         let repoInfo = null;

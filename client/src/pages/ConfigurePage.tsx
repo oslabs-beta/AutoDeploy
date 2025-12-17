@@ -108,12 +108,24 @@ export default function ConfigurePage() {
     setChatLoading(true);
 
     try {
+      // Send the same provider/config context that the manual generator uses.
+      // This prevents the wizard from producing generic placeholder provider steps.
+      const pipelineSnapshot = {
+        template,
+        provider,
+        branch,
+        stages,
+        options,
+      };
+
       const res = await api.askYamlWizard({
         repoUrl: repo,
         provider,
         branch: branch,
         message: trimmed,
         yaml,
+        // Extra context for the backend/wizard toolchain (safe to ignore if unused)
+        pipelineSnapshot,
       });
 
       if ((res as any)?.tool_called) {
@@ -148,7 +160,10 @@ export default function ConfigurePage() {
           branch,
           provider,
           stages,
-        });
+          // Keep a copy of the current options in wizard context so follow-up prompts
+          // can reference the selected provider identity (AWS role / GCP service account).
+          options,
+        } as any);
       }
 
       let text: string;
