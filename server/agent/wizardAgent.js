@@ -399,12 +399,13 @@ Tell me what you’d like to do next.
           globalThis.LAST_REPO_USED = payload.repo;
         }
 
-        // ✅ Ensure provider is valid before sending payload
-        if (
-          !payload.provider ||
-          !['aws', 'jenkins'].includes(payload.provider)
-        ) {
-          // Infer from repo visibility or fallback to AWS
+        // 🔒 Provider locking: if provider was explicitly selected in the UI (pipelineSnapshot),
+        // treat it as authoritative and NEVER override it.
+        if (pipelineSnapshot?.provider) {
+          payload.provider = pipelineSnapshot.provider;
+          console.log(`🔒 Provider locked from pipeline snapshot: ${payload.provider}`);
+        } else if (!payload.provider) {
+          // Only infer provider if none was provided at all
           payload.provider =
             repoInfo?.visibility === 'private' ? 'jenkins' : 'aws';
           console.log(`🧭 Inferred provider: ${payload.provider}`);
