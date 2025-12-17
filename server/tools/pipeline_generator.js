@@ -25,7 +25,77 @@ export const pipeline_generator = {
       .optional(),
   }),
 
-  handler: async ({ repo, branch = "main", provider = "aws", template, options }) => {
+  // Real handler (queries github_adapter for repo info and generates pipeline config)
+  handler: async ({ repo, branch = 'main', provider = 'aws', template, options }) => {
+    const normalized = {
+      nodeVersion: options?.nodeVersion,
+      installCmd: options?.installCmd,
+      testCmd: options?.testCmd,
+      buildCmd: options?.buildCmd,
+      awsRoleArn: options?.awsRoleArn,
+      stages: options?.stages,
+    };
+
+    const sessionToken = process.env.MCP_SESSION_TOKEN;
+    let decoded = {};
+    let userId = null;
+
+    // No req.cookies available in MCP tool mode — skip direct session lookups.
+    console.warn(
+      '⚠️ Skipping requireSession — tool is running without HTTP request context.'
+    );
+
+    // Fallback: decode MCP_SESSION_TOKEN if no user found
+    if (!userId && sessionToken) {
+      try {
+        decoded = jwt.decode(sessionToken);
+        userId = decoded?.user?.id || decoded?.sub || null;
+        if (userId)
+          console.log('🧠 Resolved user_id from decoded token:', userId);
+      } catch (err) {
+        console.warn('⚠️ Could not decode MCP_SESSION_TOKEN:', err.message);
+      }
+    }
+
+    if (!userId) {
+      console.warn('⚠️ Could not resolve user_id — defaulting to anonymous.');
+      userId = '00000000-0000-0000-0000-000000000000';
+    }
+
+    // 🧠 Try to resolve user_id from GitHub username if still anonymous
+    if (userId === '00000000-0000-0000-0000-000000000000') {
+      let githubUsername =
+        decoded?.github_username || process.env.GITHUB_USERNAME || null;
+
+      if (githubUsername) {
+        try {
+          const { rows: userRows } = await pool.query(
+            `SELECT id FROM users WHERE github_username = $1 LIMIT 1`,
+            [githubUsername]
+          );
+
+          if (userRows.length > 0) {
+            userId = userRows[0].id;
+            console.log('🔄 Resolved user_id from github_username:', userId);
+          } else {
+            console.warn(
+              '⚠️ No user found in DB matching github_username:',
+              githubUsername
+            );
+          }
+        } catch (err) {
+          console.warn(
+            '⚠️ Failed to resolve user_id from github_username:',
+            err.message
+          );
+        }
+      } else {
+        console.warn('⚠️ No GitHub username available to resolve user_id.');
+      }
+    }
+
+    // Try DB lookup for GitHub token first
+    let githubToken = null;
     try {
       const normalized = {
         nodeVersion: options?.nodeVersion,

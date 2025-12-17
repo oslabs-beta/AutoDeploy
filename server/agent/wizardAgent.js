@@ -23,6 +23,49 @@ function getOpenAIClient() {
 }
 // -----------------------
 
+// --- Intent extraction using LLM (structured, no regex routing) ---
+async function extractGitHubIntent(llmClient, userText) {
+  const intentPrompt = `
+You are an intent classifier for a GitHub automation agent.
+
+Return ONLY valid JSON. Do not explain anything.
+
+Valid intents:
+- list_repos
+- repo_info
+- list_root
+- list_path
+- check_file
+- check_dir
+- read_file
+- list_workflows
+- list_branches
+- list_commits
+
+Return JSON with exactly these fields:
+{
+  "intent": string,
+  "repo": string | null,
+  "path": string | null
+}
+
+User request:
+"${userText}"
+`;
+
+  const res = await llmClient.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [{ role: "system", content: intentPrompt }],
+  });
+
+  try {
+    return JSON.parse(res.choices[0].message.content);
+  } catch (e) {
+    console.warn("⚠️ Failed to parse intent JSON, falling back to repo_info");
+    return { intent: "repo_info", repo: null, path: null };
+  }
+}
+
 // Helper: call MCP routes dynamically, with error handling
 async function callMCPTool(tool, input, cookie) {
   try {
@@ -59,6 +102,27 @@ export async function runWizardAgent(userPrompt) {
         userPrompt?.body?.prompt ||
         '';
 
+  // 🛑 Intent guard: handle meta / capability questions WITHOUT tools
+  if (/what can you do|what do you do|help|capabilities|how does this work/i.test(userPromptText)) {
+    return {
+      success: true,
+      agent_decision: "capabilities",
+      tool_called: null,
+      message: `
+I’m your CI/CD wizard. Here’s what I can help you with:
+
+• Analyze your GitHub repositories
+• Generate GitHub Actions CI/CD pipelines
+• Suggest best practices (branches, caching, matrix builds)
+• Configure Node, Python, or container-based workflows
+• Help commit workflows and open pull requests
+• Explain CI/CD concepts step by step
+
+Tell me what you’d like to do next.
+`
+    };
+  }
+
   // Guard: prevent empty or meaningless prompts from reaching the LLM
   if (!userPromptText || userPromptText.trim().length < 3) {
     return {
@@ -79,7 +143,7 @@ export async function runWizardAgent(userPrompt) {
   - oidc_adapter: lists AWS roles or Jenkins jobs
   - github_adapter: fetches real-time GitHub repository data through an authenticated API connection
   Do not say that you lack access to GitHub or external data — you can retrieve this information directly through the available tools.
-  Always respond with factual data from the tool response only.
+  Only call tools when the user explicitly asks for data retrieval or actions. Do NOT call tools for explanations, help, or capability questions.
 
   If the user asks:
   - “What repositories do I have on GitHub?” → use \`github_adapter\` with \`{ action: "repos" }\`
@@ -139,7 +203,7 @@ export async function runWizardAgent(userPrompt) {
 
   // Tool mapping using regex patterns
   const toolMap = {
-    repo_reader: /\b(list repos|list repositories|repositories|repo_reader)\b/i,
+    repo_reader: /\b(list repos|list repositories|repo_reader)\b/i,
     pipeline_generator: /\bpipeline\b/i,
     pipeline_commit:
       /\b(yes commit|commit (the )?(pipeline|workflow|file)|apply (the )?(pipeline|workflow)|save (the )?(pipeline|workflow)|push (the )?(pipeline|workflow))\b/i,
@@ -147,8 +211,17 @@ export async function runWizardAgent(userPrompt) {
     github_adapter: /\b(github|repo info|repository|[\w-]+\/[\w-]+)\b/i,
   };
 
+  // Short-circuit if agent_decision is "capabilities"
+  if (agentMeta.agent_decision === "capabilities") {
+    return {
+      success: true,
+      agent_decision: agentMeta.agent_decision,
+      tool_called: null
+    };
+  }
+
   for (const [toolName, pattern] of Object.entries(toolMap)) {
-    if (pattern.test(decision) || pattern.test(userPromptText)) {
+    if (pattern.test(userPromptText)) {
       console.log('🔧 Triggering MCP tool:', toolName);
 
       // --- Extract context dynamically from userPrompt or decision ---
@@ -188,7 +261,14 @@ export async function runWizardAgent(userPrompt) {
         null
       )?.toLowerCase();
 
-      if (toolName === 'repo_reader') {
+      if (toolName === "repo_reader") {
+        // Prevent accidental file reads with repo_reader
+        if (/\b(read|get|open)\b.*\b(file|contents)\b/i.test(userPromptText)) {
+          return {
+            success: false,
+            error: "File reading is handled by the GitHub adapter. Please specify a GitHub repository and file path."
+          };
+        }
         // Extract optional username, user_id, and repo info
         const usernameMatch = userPromptText.match(
           /\busername[:=]?\s*([\w-]+)\b/i
@@ -440,24 +520,102 @@ export async function runWizardAgent(userPrompt) {
         };
       }
 
-      if (toolName === 'github_adapter') {
-        if (repo) {
-          agentMeta.tool_called = 'github_adapter';
-          const output = await callMCPTool('github/info', { repo }, cookie);
+      if (toolName === "github_adapter") {
+        agentMeta.tool_called = "github_adapter";
+
+        // --- Structured intent extraction ---
+        const intentData = await extractGitHubIntent(client, userPromptText);
+        const { intent, repo: intentRepo, path: intentPath } = intentData;
+
+        const resolvedRepo = repo || intentRepo;
+
+        // 🔒 Path always implies filesystem, never GitHub Actions metadata
+        let normalizedIntent = intent;
+        if (intentPath && intent === "list_workflows") {
+          normalizedIntent = "list_path";
+        }
+
+        // Map intent → github_adapter action
+        let action;
+        let path;
+
+        switch (normalizedIntent) {
+          case "list_repos":
+            action = "repos";
+            break;
+
+          case "list_root":
+            action = "contents";
+            break;
+
+          case "list_path":
+            action = "contents";
+            path = intentPath;
+            break;
+
+          case "check_dir":
+            action = "contents";
+            path = intentPath;
+            break;
+
+          case "check_file":
+            action = "file";
+            path = intentPath;
+            break;
+
+          case "read_file":
+            action = "file";
+            path = intentPath;
+            break;
+
+          case "list_workflows":
+            action = "workflows";
+            break;
+
+          case "list_branches":
+            action = "branches";
+            break;
+
+          case "list_commits":
+            action = "commits";
+            break;
+
+          case "repo_info":
+          default:
+            action = "info";
+            break;
+        }
+
+        // Repos listing does not require repo
+        if (action === "repos") {
+          const output = await callMCPTool("github_adapter", { action }, cookie);
           return {
             success: true,
             agent_decision: agentMeta.agent_decision,
             tool_called: agentMeta.tool_called,
             tool_output: output,
           };
-        } else {
-          console.warn('⚠️ Missing repo for GitHub info retrieval.');
+        }
+
+        // All other actions require a repo
+        if (!resolvedRepo) {
           return {
             success: false,
-            error:
-              "Couldn’t determine which repository to fetch. Please include it in your request (e.g., 'tell me about user/repo').",
+            error: "Please specify a repository (e.g. 'user/repo')."
           };
         }
+
+        const payload = { action, repo: resolvedRepo };
+        if (path) payload.path = path;
+
+        const output = await callMCPTool("github_adapter", payload, cookie);
+
+        return {
+          success: true,
+          agent_decision: agentMeta.agent_decision,
+          tool_called: agentMeta.tool_called,
+          tool_output: output
+        };
       }
     }
   }
