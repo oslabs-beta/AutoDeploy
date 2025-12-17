@@ -16,13 +16,16 @@ export default function ConfigurePage() {
     template,
     stages,
     options,
+    provider,
     roles,
     status,
     error,
     result,
     setTemplate,
+    setProvider,
     toggleStage,
     setOption,
+    setResultYaml,
     loadAwsRoles,
     regenerate,
     openPr,
@@ -56,24 +59,17 @@ export default function ConfigurePage() {
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
 
-  // Load AWS roles when repo/branch is picked
+  // Load AWS roles when repo/branch is picked and provider is aws
   useEffect(() => {
-    if (!repo || !branch) return;
+    if (!repo || !branch || provider !== "aws") return;
     loadAwsRoles().catch(console.error);
-  }, [repo, branch, loadAwsRoles]);
+  }, [repo, branch, provider, loadAwsRoles]);
 
   const handleGenerate = async () => {
     if (!repo || !branch) {
       alert("Pick a repo + branch on the Connect page first.");
       return;
     }
-    console.log("[ConfigurePage] Generate clicked with inputs:", {
-      repo,
-      branch,
-      template,
-      stages,
-      options,
-    });
     await regenerate({ repo, branch });
   };
 
@@ -100,7 +96,9 @@ export default function ConfigurePage() {
     if (!trimmed) return;
 
     if (!repo || !branch) {
-      alert("Pick a repo + branch on the Connect page first so I can give better suggestions.");
+      alert(
+        "Pick a repo + branch on the Connect page first so I can give better suggestions."
+      );
       return;
     }
 
@@ -111,26 +109,23 @@ export default function ConfigurePage() {
 
     try {
       const res = await api.askYamlWizard({
-        repoUrl: repo,       // backend expects "repoUrl"
-        provider: "aws",     // or whatever provider you use
-        branch: branch,      // backend expects "branch"
-        message: trimmed,    // optional, for your agent logic
-        yaml,                // optional, current YAML for context
+        repoUrl: repo,
+        provider,
+        branch: branch,
+        message: trimmed,
+        yaml,
       });
 
-      // ---- Update wizard context memory ----
       if ((res as any)?.tool_called) {
         setLastToolCalled((res as any).tool_called);
       }
 
-      // If repo info is available from selection or tool output, store it
       if (repo) {
         setRepoInfo({
           fullName: repo,
         });
       }
 
-      // If a pipeline was generated, hydrate pipeline store + wizard context
       if ((res as any)?.tool_called === "pipeline_generator") {
         const generatedYaml =
           (res as any)?.generated_yaml ??
@@ -151,7 +146,7 @@ export default function ConfigurePage() {
         setPipelineInfo({
           pipelineName,
           branch,
-          provider: "aws",
+          provider,
           stages,
         });
       }
@@ -166,14 +161,13 @@ export default function ConfigurePage() {
         (res as any)?.tool_called === "repo_reader" &&
         Array.isArray((res as any)?.tool_output?.data?.data?.repositories)
       ) {
-        const count =
-          (res as any).tool_output.data.data.repositories.length;
+        const count = (res as any).tool_output.data.data.repositories.length;
         text = `I found ${count} repositories. You can select one from the list to continue.`;
       } else if (repoInfo?.fullName) {
-        text = `I’m looking at ${repoInfo.fullName}. What would you like to change about the pipeline?`;
+        text = `I'm looking at ${repoInfo.fullName}. What would you like to change about the pipeline?`;
       } else {
         text =
-          "I couldn’t map that request to an action yet. You can ask me to modify the pipeline, deploy settings, or AWS role.";
+          "I couldn't map that request to an action yet. You can ask me to modify the pipeline, deploy settings, or AWS role.";
       }
 
       const assistantMessage: ChatMessage = {
@@ -206,21 +200,21 @@ export default function ConfigurePage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100">
+    <div className="min-h-screen text-slate-100">
       <div className="max-w-6xl mx-auto p-6 space-y-8">
         {/* Header */}
         <header className="space-y-1">
-          <h1 className="text-3xl font-semibold tracking-tight">
+          <h1 className="text-3xl font-semibold tracking-tight text-white">
             Configure CI/CD pipeline
           </h1>
           {repo && branch ? (
-            <p className="text-sm text-slate-600">
+            <p className="text-sm text-slate-200">
               Targeting{" "}
-              <span className="font-mono text-slate-900">{repo}</span> @{" "}
-              <span className="font-mono text-slate-900">{branch}</span>
+              <span className="font-mono text-white">{repo}</span> @{" "}
+              <span className="font-mono text-white">{branch}</span>
             </p>
           ) : (
-            <p className="text-sm text-amber-700">
+            <p className="text-sm text-amber-300">
               Pick a GitHub repo + branch on the Connect page first.
             </p>
           )}
@@ -229,7 +223,7 @@ export default function ConfigurePage() {
         {/* Top grid: Config form (left) + AI wizard (right) */}
         <div className="grid gap-6 lg:grid-cols-2">
           {/* ===== Left: Config form ===== */}
-          <section className="space-y-6 rounded-xl border bg-white/90 p-4 shadow-sm">
+          <section className="space-y-6 rounded-2xl border border-white/20 bg-white/10 backdrop-blur-md shadow-glass p-6 text-white">
             {/* Template */}
             <label className="grid gap-1">
               <span className="text-sm font-medium text-slate-800">Template</span>
@@ -237,14 +231,31 @@ export default function ConfigurePage() {
                 disabled={busy}
                 value={template}
                 onChange={(e) => setTemplate(e.target.value)}
-                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 disabled:bg-slate-100 disabled:text-slate-400"
+                className="rounded-md border border-white/25 bg-white px-3 py-2 text-sm text-slate-900 placeholder-slate-500"
               >
                 <option value="node_app">Node.js app</option>
                 <option value="node_library">Node.js library</option>
                 <option value="react_vite">React/Vite app</option>
               </select>
-              <span className="text-xs text-slate-500">
+              <span className="text-xs text-slate-200">
                 Pick the closest match to your repo; the MCP backend refines it.
+              </span>
+            </label>
+
+            {/* Provider */}
+            <label className="grid gap-1">
+              <span className="text-sm font-medium">Provider</span>
+              <select
+                disabled={busy}
+                value={provider}
+                onChange={(e) => setProvider(e.target.value as "aws" | "gcp")}
+                className="rounded-md border border-white/25 bg-white px-3 py-2 text-sm text-slate-900 placeholder-slate-500"
+              >
+                <option value="aws">AWS</option>
+                <option value="gcp">GCP</option>
+              </select>
+              <span className="text-xs text-slate-200">
+                Choose where to run and deploy your pipeline.
               </span>
             </label>
 
@@ -262,7 +273,7 @@ export default function ConfigurePage() {
                       disabled={busy}
                       checked={toggleStageChecked(stage)}
                       onChange={() => toggleStage(stage)}
-                      className="h-4 w-4 rounded border-slate-300"
+                      className="h-4 w-4 rounded border-white/40 bg-white/10"
                     />
                     <span className="capitalize">{stage}</span>
                   </label>
@@ -278,9 +289,7 @@ export default function ConfigurePage() {
                   disabled={busy}
                   value={options.nodeVersion}
                   onChange={(e) => setOption("nodeVersion", e.target.value)}
-                  className="rounded-md border px-3 py-2 text-sm font-mono
-           text-slate-900 bg-white
-           disabled:bg-slate-100 disabled:text-slate-400"
+                  className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
                   placeholder="20"
                 />
               </label>
@@ -291,9 +300,7 @@ export default function ConfigurePage() {
                   disabled={busy}
                   value={options.installCmd}
                   onChange={(e) => setOption("installCmd", e.target.value)}
-                  className="rounded-md border px-3 py-2 text-sm font-mono
-           text-slate-900 bg-white
-           disabled:bg-slate-100 disabled:text-slate-400"
+                  className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
                   placeholder="npm ci"
                 />
               </label>
@@ -304,9 +311,7 @@ export default function ConfigurePage() {
                   disabled={busy}
                   value={options.testCmd}
                   onChange={(e) => setOption("testCmd", e.target.value)}
-                  className="rounded-md border px-3 py-2 text-sm font-mono
-           text-slate-900 bg-white
-           disabled:bg-slate-100 disabled:text-slate-400"
+                  className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
                   placeholder="npm test"
                 />
               </label>
@@ -317,35 +322,54 @@ export default function ConfigurePage() {
                   disabled={busy}
                   value={options.buildCmd}
                   onChange={(e) => setOption("buildCmd", e.target.value)}
-                  className="rounded-md border px-3 py-2 text-sm font-mono
-           text-slate-900 bg-white
-           disabled:bg-slate-100 disabled:text-slate-400"
+                  className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
                   placeholder="npm run build"
                 />
               </label>
             </div>
 
-            {/* AWS Role */}
-            <label className="grid gap-1">
-              <span className="text-sm font-medium text-slate-800">AWS Role (OIDC)</span>
-              <select
-                disabled={busy || !roles.length}
-                value={options.awsRoleArn ?? ""}
-                onChange={(e) => setOption("awsRoleArn", e.target.value)}
-                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 disabled:bg-slate-100 disabled:text-slate-400"
-              >
-                <option value="">-- select --</option>
-                {roles.map((r) => (
-                  <option key={r.arn} value={r.arn}>
-                    {r.name}
-                  </option>
-                ))}
-              </select>
-              <span className="text-xs text-slate-500">
-                Roles come from the backend OIDC adapter; we’ll wire this into
-                the deploy job.
-              </span>
-            </label>
+            {provider === "aws" && (
+              <label className="grid gap-1">
+                <span className="text-sm font-medium">AWS Role (OIDC)</span>
+                <select
+                  disabled={busy || !roles.length}
+                  value={options.awsRoleArn ?? ""}
+                  onChange={(e) => setOption("awsRoleArn", e.target.value)}
+                  className="rounded-md border border-white/25 px-3 py-2 text-sm bg-black text-white"
+                >
+                  <option value="">-- select --</option>
+                  {roles.map((r) => (
+                    <option key={r.arn} value={r.arn}>
+                      {r.name}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-xs text-slate-200">
+                  Roles come from the backend OIDC adapter; we’ll wire this into
+                  the deploy job.
+                </span>
+              </label>
+            )}
+
+            {provider === "gcp" && (
+              <label className="grid gap-1">
+                <span className="text-sm font-medium">
+                  GCP Service Account Email
+                </span>
+                <input
+                  disabled={busy}
+                  value={options.gcpServiceAccountEmail ?? ""}
+                  onChange={(e) =>
+                    setOption("gcpServiceAccountEmail", e.target.value)
+                  }
+                  className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                  placeholder="service-account@project.iam.gserviceaccount.com"
+                />
+                <span className="text-xs text-slate-200">
+                  Provide the service account that should run deployments.
+                </span>
+              </label>
+            )}
 
             {/* Generate / Open PR buttons */}
             <div className="flex flex-wrap items-center gap-3 pt-2">
@@ -353,7 +377,7 @@ export default function ConfigurePage() {
                 type="button"
                 onClick={handleGenerate}
                 disabled={busy || !repo || !branch}
-                className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-md bg-white/20 hover:bg-white/30 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {busy ? "Generating…" : "Generate pipeline"}
               </button>
@@ -362,31 +386,31 @@ export default function ConfigurePage() {
                 type="button"
                 onClick={handleOpenPr}
                 disabled={!result || !yaml}
-                className="rounded-md border border-slate-900 px-4 py-2 text-sm font-medium text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-md border border-white/40 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Open PR with YAML
               </button>
 
               {status === "success" && (
-                <span className="text-xs text-emerald-700">
+                <span className="text-xs text-emerald-200">
                   YAML ready — review or edit below, then open a PR.
                 </span>
               )}
             </div>
 
             {error && (
-              <p className="text-sm text-red-600">
+              <p className="text-sm text-red-300">
                 Error: {error}
               </p>
             )}
           </section>
 
           {/* ===== Right: AI YAML Wizard Chat ===== */}
-          <section className="flex flex-col rounded-xl border bg-white/90 p-4 shadow-sm">
+          <section className="flex flex-col rounded-2xl border border-white/20 bg-white/10 backdrop-blur-md shadow-glass p-6 text-white">
             <div className="mb-3 flex items-center justify-between gap-2">
               <div>
-                <h2 className="text-sm font-medium text-slate-900">AI YAML wizard</h2>
-                <p className="text-xs text-slate-500">
+                <h2 className="text-sm font-medium">AI YAML wizard</h2>
+                <p className="text-xs text-slate-200">
                   Describe how you want your workflow to behave. I’ll suggest
                   envs, branches, caching, matrix builds, etc.
                 </p>
@@ -394,7 +418,7 @@ export default function ConfigurePage() {
             </div>
 
             {/* Chat messages */}
-            <div className="flex-1 min-h-[200px] max-h-[320px] overflow-y-auto rounded-md border bg-slate-50 px-3 py-2 space-y-2">
+            <div className="flex-1 min-h-[200px] max-h-[320px] overflow-y-auto rounded-md border border-white/20 bg-white/5 px-3 py-2 space-y-2">
               {chatMessages.map((m, idx) => (
                 <div
                   key={idx}
@@ -405,8 +429,8 @@ export default function ConfigurePage() {
                   <div
                     className={`rounded-lg px-3 py-2 text-xs whitespace-pre-wrap ${
                       m.role === "user"
-                        ? "bg-slate-900 text-white"
-                        : "bg-white text-slate-900 border border-slate-300"
+                        ? "bg-white/20 text-white border border-white/30"
+                        : "bg-white text-slate-900 border border-slate-200"
                     } max-w-[80%]`}
                   >
                     {m.content}
@@ -414,7 +438,7 @@ export default function ConfigurePage() {
                 </div>
               ))}
               {chatLoading && (
-                <p className="text-[11px] text-slate-500">
+                <p className="text-[11px] text-slate-200">
                   Thinking about your pipeline…
                 </p>
               )}
@@ -423,7 +447,7 @@ export default function ConfigurePage() {
             {/* Chat input */}
             <div className="mt-3 space-y-2">
               <textarea
-                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 resize-none disabled:bg-slate-100 disabled:text-slate-400"
+                className="w-full rounded-md border border-white/25 bg-white/10 text-white px-3 py-2 text-xs resize-none placeholder-white/60"
                 rows={3}
                 placeholder="E.g. I want this to run only on main and PRs, use Node 20, cache npm, and deploy to prod on tags starting with v*…"
                 value={chatInput}
@@ -436,7 +460,7 @@ export default function ConfigurePage() {
                   type="button"
                   onClick={handleSendChat}
                   disabled={chatLoading || !chatInput.trim()}
-                  className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  className="rounded-md bg-white/20 hover:bg-white/30 px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {chatLoading ? "Asking…" : "Ask wizard"}
                 </button>
@@ -446,11 +470,11 @@ export default function ConfigurePage() {
         </div>
 
         {/* ===== YAML Preview / Editor (full width) ===== */}
-        <section className="space-y-3 rounded-xl border bg-slate-950 text-slate-100 p-4 shadow-sm">
+        <section className="space-y-3 rounded-2xl border border-white/20 bg-white/10 backdrop-blur-md text-slate-100 p-4 shadow-glass">
           <div className="flex items-center justify-between gap-2">
             <div>
               <h2 className="text-sm font-medium">GitHub Actions YAML</h2>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-slate-200">
                 Review the generated workflow. Switch to manual mode to tweak
                 before opening a PR.
               </p>
@@ -460,18 +484,34 @@ export default function ConfigurePage() {
               type="button"
               onClick={() => setEditing(!editing)}
               disabled={!result}
-              className="rounded-md border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-md border border-white/40 px-3 py-1.5 text-xs font-medium text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {editing ? "Back to wizard view" : "Edit YAML manually"}
             </button>
+            {editing && (
+              <button
+                type="button"
+                onClick={() => {
+                  const toSave = editedYaml ?? yaml;
+                  if (toSave) {
+                    setResultYaml(toSave);
+                    setEditing(false);
+                  }
+                }}
+                disabled={!editedYaml && !yaml}
+                className="rounded-md bg-white/20 hover:bg-white/30 px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Save YAML
+              </button>
+            )}
           </div>
 
           {status === "loading" && (
-            <p className="text-xs text-slate-400">Generating pipeline…</p>
+            <p className="text-xs text-slate-200">Generating pipeline…</p>
           )}
 
           {!result && status !== "loading" && (
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-slate-200">
               Generate a pipeline above to see the YAML preview.
             </p>
           )}
