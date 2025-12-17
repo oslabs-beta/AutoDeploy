@@ -1,10 +1,16 @@
-import { usePipelineStore } from "../store/usePipelineStore";
+// In dev: talk to Vite dev server proxy at /api
+// In prod: use the real backend URL from VITE_API_BASE (e.g. https://api.autodeploy.app)
+const DEFAULT_API_BASE =
+  import.meta.env.MODE === "development" ? "/api" : "";
 
 export const BASE =
-  import.meta.env.VITE_API_BASE ?? "http://localhost:3000/api";
+  import.meta.env.VITE_API_BASE || DEFAULT_API_BASE;
 
-// Derive the server base without any trailing "/api" for MCP calls
-const SERVER_BASE = BASE.replace(/\/api$/, "");
+// SERVER_BASE is the same as BASE but without trailing /api,
+// so we can call /mcp and /auth directly.
+const SERVER_BASE = BASE.endsWith("/api")
+  ? BASE.slice(0, -4)
+  : BASE;
 
 // Generic REST helper for /api/* endpoints
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
@@ -23,23 +29,72 @@ async function mcp<T>(
   tool: string,
   input: Record<string, any> = {}
 ): Promise<T> {
-  const res = await fetch(
-    `${SERVER_BASE}/mcp/v1/${encodeURIComponent(tool)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify(input),
-    }
-  );
+  const url = `${SERVER_BASE}/mcp/v1/${encodeURIComponent(tool)}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(input),
+  });
   const payload = await res.json().catch(() => ({}));
   if (!res.ok || (payload as any)?.success === false) {
     const msg = (payload as any)?.error || res.statusText || "MCP error";
     throw new Error(msg);
   }
-  // payload = { success: true, data: {...} }
   return (payload as any).data as T;
 }
+
+
+  // A single saved YAML version from pipeline_history
+export type PipelineVersion = {
+  id: string;
+  user_id: string;
+  repo_full_name: string;
+  branch: string;
+  workflow_path: string;
+  yaml: string;
+  yaml_hash: string;
+  source: string;
+  created_at: string;
+};
+
+// // Derive the server base without any trailing "/api" for MCP calls
+// const SERVER_BASE = BASE.replace(/\/api$/, "");
+
+// // Generic REST helper for /api/* endpoints
+// async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
+//   const res = await fetch(`${BASE}${path}`, {
+//     headers: { "Content-Type": "application/json" },
+//     credentials: "include",
+//     ...opts,
+//   });
+//   const data = await res.json().catch(() => ({}));
+//   if (!res.ok) throw new Error((data as any)?.error || res.statusText);
+//   return data as T;
+// }
+
+// // Helper for MCP tool calls on the server at /mcp/v1/:tool_name
+// async function mcp<T>(
+//   tool: string,
+//   input: Record<string, any> = {}
+// ): Promise<T> {
+//   const res = await fetch(
+//     `${SERVER_BASE}/mcp/v1/${encodeURIComponent(tool)}`,
+//     {
+//       method: "POST",
+//       headers: { "Content-Type": "application/json" },
+//       credentials: "include",
+//       body: JSON.stringify(input),
+//     }
+//   );
+//   const payload = await res.json().catch(() => ({}));
+//   if (!res.ok || (payload as any)?.success === false) {
+//     const msg = (payload as any)?.error || res.statusText || "MCP error";
+//     throw new Error(msg);
+//   }
+//   // payload = { success: true, data: {...} }
+//   return (payload as any).data as T;
+// }
 
 // Simple in-memory cache for AWS roles to avoid hammering MCP
 let cachedAwsRoles: string[] | null = null;
@@ -50,6 +105,58 @@ let cachedRepos: string[] | null = null;
 const cachedBranches = new Map<string, string[]>();
 
 export const api = {
+
+  // ===== Pipeline history + rollback =====
+
+  async getPipelineHistory(params: {
+    repoFullName: string;
+    branch?: string;
+    path?: string;
+    limit?: number;
+  }): Promise<PipelineVersion[]> {
+    const { repoFullName, branch, path, limit } = params;
+
+    const qs = new URLSearchParams();
+    qs.set("repoFullName", repoFullName);
+    if (branch) qs.set("branch", branch);
+    if (path) qs.set("path", path);
+    if (limit) qs.set("limit", String(limit));
+
+    const res = await fetch(
+      `${SERVER_BASE}/mcp/v1/pipeline_history?${qs.toString()}`,
+      {
+        method: "GET",
+        credentials: "include",
+      }
+    );
+
+    const payload = await res.json().catch(() => ({} as any));
+    if (!res.ok || !payload.ok) {
+      throw new Error(payload.error || res.statusText || "History failed");
+    }
+
+    // Back-end shape: { ok: true, versions: { rows: [...] } }
+    const rows = (payload.versions?.rows ?? []) as PipelineVersion[];
+    return rows;
+  },
+
+  async rollbackPipeline(versionId: string): Promise<any> {
+    const res = await fetch(`${SERVER_BASE}/mcp/v1/pipeline_rollback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ versionId }),
+    });
+
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok || !payload.ok) {
+      throw new Error(payload.error || res.statusText || "Rollback failed");
+    }
+
+    // Backend mention: data.data.github.commit.html_url, etc
+    return payload.data;
+  },
+
 
   async listAwsRoles(): Promise<{ roles: string[] }> {
     // If we've already successfully fetched roles, reuse them.
@@ -181,10 +288,91 @@ export const api = {
       return { branches: cachedBranches.get(repo) ?? [] };
     }
   },
+//  async listRepos(): Promise<{ repos: string[] }> {
+//     //  If we already have repos cached, reuse them.
+//     if (cachedRepos && cachedRepos.length > 0) {
+//       return { repos: cachedRepos };
+//     }
+
+//     //  If we've already tried once and failed, don't hammer the server.
+//     if (reposAttempted && !cachedRepos) {
+//       return { repos: [] };
+//     }
+
+//     reposAttempted = true;
+
+//     try {
+//       const outer = await mcp<{
+//         provider: string;
+//         user: string;
+//         repositories: { full_name: string }[];
+//       }>("repo_reader", {});
+
+//       const repos = outer?.repositories?.map((r) => r.full_name) ?? [];
+//       cachedRepos = repos;
+//       return { repos };
+//     } catch (err) {
+//       console.error("[api.listRepos] failed:", err);
+//       // Don't throw to avoid retry loops from effects; just return whatever we have (or empty).
+//       return { repos: cachedRepos ?? [] };
+//     }
+//   },
+
+  //   async listBranches(repo: string): Promise<{ branches: string[] }> {
+  //   // ✅ If we already have branches cached for this repo, reuse them.
+  //   const cached = cachedBranches.get(repo);
+  //   if (cached) {
+  //     return { branches: cached };
+  //   }
+
+  //   try {
+  //     // For now we still use repo_reader, but we only call it
+  //     // when the cache is cold. We can later swap this to a
+  //     // more specific MCP tool like "repo_branches".
+  //     const outer = await mcp<{
+  //       success?: boolean;
+  //       data?: { repositories: { full_name: string; branches?: string[] }[] };
+  //       repositories?: { full_name: string; branches?: string[] }[];
+  //     }>("repo_reader", {
+  //       // This extra input is safe: current server ignores it,
+  //       // future server can use it to optimize.
+  //       repoFullName: repo,
+  //     });
+
+  //     // Unwrap the payload (tool responses come back as { success, data })
+  //     const body = (outer as any)?.data ?? outer;
+
+  //     const match = body?.repositories?.find((r: any) => r.full_name === repo);
+  //     const branches = match?.branches ?? [];
+
+  //     // Cache even empty arrays so we don't re-query a repo with no branches
+  //     cachedBranches.set(repo, branches);
+
+  //     return { branches };
+  //   } catch (err) {
+  //     console.error("[api.listBranches] failed:", err);
+
+  //     // If we have anything cached (even empty), use it.
+  //     const fallback = cachedBranches.get(repo) ?? [];
+  //     return { branches: fallback };
+  //   }
+  // },
 
   async createPipeline(payload: any) {
-    const { repo, branch, template = "node_app", options } = payload || {};
-    const data = await mcp("pipeline_generator", payload);
+    const {
+      repo,
+      branch,
+      template = "node_app",
+      provider = "aws",
+      options,
+    } = payload || {};
+    const data = await mcp("pipeline_generator", {
+      repo,
+      branch,
+      provider,
+      template,
+      options: options || {},
+    });
     return data;
   },
 

@@ -14,8 +14,9 @@ type PipelineState = {
     testCmd: string;
     buildCmd: string;
     awsRoleArn?: string;
+    gcpServiceAccountEmail?: string;
   };
-  provider: "aws" | "jenkins";
+  provider: "aws" | "gcp" | "jenkins";
 
   // outputs from MCP
   result?: McpPipeline;
@@ -37,7 +38,7 @@ type PipelineState = {
 
 type PipelineActions = {
   setTemplate(t: string): void;
-  setProvider(p: "aws" | "jenkins"): void;
+  setProvider(p: PipelineState["provider"]): void;
   toggleStage(s: Stage): void;
   setOption<K extends keyof PipelineState["options"]>(
     k: K,
@@ -58,6 +59,9 @@ type PipelineActions = {
     generatedYaml: string;
     pipelineName?: string;
   }): void;
+
+  // Allow updating the stored YAML after manual edits (Dashboard)
+  setResultYaml(yaml: string): void;
 };
 
 const initial: PipelineState = {
@@ -68,6 +72,7 @@ const initial: PipelineState = {
     installCmd: "npm ci",
     testCmd: "npm test",
     buildCmd: "npm run build",
+    gcpServiceAccountEmail: "",
   },
   provider: "aws",
   roles: [],
@@ -83,6 +88,8 @@ export const usePipelineStore = create<PipelineState & PipelineActions>()(
     ...initial,
 
     setTemplate: (t) => set({ template: t }),
+    setProvider: (p) => set({ provider: p }),
+    setProvider: (p) => set({ provider: p }),
 
     toggleStage: (s) => {
       const cur = get().stages;
@@ -162,12 +169,13 @@ export const usePipelineStore = create<PipelineState & PipelineActions>()(
     async regenerate({ repo, branch }) {
       set({ status: "loading", error: undefined });
       try {
-        const { template, stages, options } = get();
+        const { template, stages, options, provider } = get();
         const res = await api.createPipeline({
           repo,
           branch,
           service: "ci-cd-generator",
           template,
+          provider,
           options: { ...options, stages },
         });
 
@@ -237,6 +245,17 @@ export const usePipelineStore = create<PipelineState & PipelineActions>()(
         "[usePipelineStore] Hydrated YAML from wizard:",
         generatedYaml.slice(0, 80)
       );
+    },
+
+    setResultYaml(yaml: string) {
+      const r = get().result ?? {};
+      set({
+        result: {
+          ...r,
+          generated_yaml: yaml,
+          yaml,
+        },
+      });
     },
 
     setEditing: (b) => set({ editing: b }),
