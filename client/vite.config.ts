@@ -20,11 +20,15 @@ export default defineConfig({
         target: "http://localhost:3000",
         changeOrigin: true,
       },
-      // // optional, if you have other endpoints like /api
-      // "/api": {
-      //   target: "http://localhost:3000",
-      //   changeOrigin: true,
-      // },
+      // optional, if you have other endpoints like /api
+      "/api": {
+        target: "http://localhost:3000",
+        changeOrigin: true,
+      },
+      "/agent": {
+        target: "http://localhost:3000",
+        changeOrigin: true,
+      },
     },
   },
 });
