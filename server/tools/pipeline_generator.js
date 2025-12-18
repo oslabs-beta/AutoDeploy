@@ -19,6 +19,8 @@ export const pipeline_generator = {
         testCmd: z.string().optional(),
         buildCmd: z.string().optional(),
         awsRoleArn: z.string().optional(),
+        awsSessionName: z.string().optional(),
+        awsRegion: z.string().optional(),
         gcpServiceAccountEmail: z.string().optional(),
         stages: z.array(z.enum(["build", "test", "deploy"])).optional(),
       })
@@ -33,6 +35,8 @@ export const pipeline_generator = {
       testCmd: options?.testCmd,
       buildCmd: options?.buildCmd,
       awsRoleArn: options?.awsRoleArn,
+      awsSessionName: options?.awsSessionName,
+      awsRegion: options?.awsRegion,
       stages: options?.stages,
     };
 
@@ -103,6 +107,8 @@ export const pipeline_generator = {
         testCmd: options?.testCmd,
         buildCmd: options?.buildCmd,
         awsRoleArn: options?.awsRoleArn,
+        awsSessionName: options?.awsSessionName,
+        awsRegion: options?.awsRegion,
         gcpServiceAccountEmail: options?.gcpServiceAccountEmail,
         stages: options?.stages,
       };
@@ -177,7 +183,8 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${normalized.awsRoleArn ?? "REPLACE_ME"}
-          aws-region: us-east-1
+          role-session-name: ${normalized.awsSessionName ?? "autodeploy"}
+          aws-region: ${normalized.awsRegion ?? "us-east-1"}
       - name: Deploy Application
         run: echo "Deploying ${repo} to AWS..."
 `;

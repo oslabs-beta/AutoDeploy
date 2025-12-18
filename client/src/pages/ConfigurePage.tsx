@@ -329,6 +329,7 @@ export default function ConfigurePage() {
             </div>
 
             {provider === "aws" && (
+              <>
               <label className="grid gap-1">
                 <span className="text-sm font-medium">AWS Role (OIDC)</span>
                 <select
@@ -349,6 +350,28 @@ export default function ConfigurePage() {
                   the deploy job.
                 </span>
               </label>
+              <label className="grid gap-1">
+                <span className="text-sm font-medium">AWS Role Session Name</span>
+                <input
+                  disabled={busy}
+                  value={options.awsSessionName ?? ""}
+                  onChange={(e) => setOption("awsSessionName", e.target.value)}
+                  className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                  placeholder="autodeploy"
+                />
+              </label>
+
+              <label className="grid gap-1">
+                <span className="text-sm font-medium">AWS Region</span>
+                <input
+                  disabled={busy}
+                  value={options.awsRegion ?? ""}
+                  onChange={(e) => setOption("awsRegion", e.target.value)}
+                  className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                  placeholder="us-east-1"
+                />
+              </label>
+              </>
             )}
 
             {provider === "gcp" && (
