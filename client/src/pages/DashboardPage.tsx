@@ -38,6 +38,12 @@ export default function DashboardPage() {
   const repoFullName = result?.repo || repo || "";
   const branchName =
     (result as any)?.branch || selectedBranch || "main";
+  const environment = cfg.env || "dev";
+  const workflowFile =
+    (result as any)?.pipeline_name || `${environment}-deploy.yml`;
+  const workflowPath = workflowFile.startsWith(".github/workflows/")
+    ? workflowFile
+    : `.github/workflows/${workflowFile}`;
 
   const [versions, setVersions] = useState<PipelineVersion[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -48,6 +54,12 @@ export default function DashboardPage() {
 
   const [editingYaml, setEditingYaml] = useState(false);
   const [draftYaml, setDraftYaml] = useState(result?.generated_yaml ?? "");
+  const currentYaml = (result?.generated_yaml ?? draftYaml ?? "").trim();
+  const canCommitYaml = currentYaml.length > 0;
+  // 🔑 Single source of truth for the currently active YAML
+
+// const canCommitYaml =
+//   (editingYaml ? draftYaml : (result?.generated_yaml ?? draftYaml))?.trim();
 
   useEffect(() => {
     if (!editingYaml) {
@@ -67,6 +79,7 @@ export default function DashboardPage() {
         const rows = await api.getPipelineHistory({
           repoFullName,
           branch: branchName,
+          path: workflowPath,
           limit: 20,
         });
         if (!cancelled) {
@@ -88,57 +101,79 @@ export default function DashboardPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoFullName, branchName]);
+  }, [repoFullName, branchName, workflowPath]);
 
-  async function handleRollback(version: PipelineVersion) {
-    if (!version?.id) return;
-    const confirmMsg = `Rollback ${repoFullName}@${branchName} to version created at ${formatDate(
-      version.created_at
-    )}?`;
-    if (!window.confirm(confirmMsg)) return;
+async function handleRollback(version: PipelineVersion) {
+  if (!version?.id) return;
 
-    setRollbackBusy(true);
-    try {
-      const data = await api.rollbackPipeline(version.id);
-      console.log("[Dashboard] Rollback response:", data);
-      alert("Rollback queued successfully.");
+  const confirmMsg = `Rollback ${repoFullName}@${branchName} to version created at ${formatDate(
+    version.created_at
+  )}?`;
+  if (!window.confirm(confirmMsg)) return;
 
-      const rows = await api.getPipelineHistory({
-        repoFullName,
-        branch,
-        limit: 20,
-      });
-      setVersions(rows);
-    } catch (err: any) {
-      console.error("[Dashboard] rollbackPipeline failed:", err);
-      alert(err.message || "Rollback failed");
-    } finally {
-      setRollbackBusy(false);
-    }
-  }
+  setRollbackBusy(true);
+  try {
+    // 👇 THIS is where the rollback happens
+    const data = await api.rollbackPipeline(version.id);
 
-  function handleCommitClick() {
-    const repoFullNameLocal = result?.repo || repo;
-    const yaml = result?.generated_yaml;
-    const branchLocal = (result as any)?.branch || branchName || "main";
-    const environment = cfg.env || "dev";
-    const provider = "aws";
-    const path = `.github/workflows/${environment}-deploy.yml`;
+    // 👇 SHOW REAL OUTPUT (GitHub commit URL)
+    alert(
+      `Rollback committed ✅\n${
+        data?.github?.commit?.html_url ?? "OK"
+      }`
+    );
 
-    if (!repoFullNameLocal || !yaml) {
-      alert("Missing repo or YAML — generate a pipeline first.");
-      return;
-    }
+    // 👇 Update Current Pipeline YAML in UI
+    setResultYaml(version.yaml);
+    setEditingYaml(false);
 
-    startDeploy({
-      repoFullName: repoFullNameLocal,
-      branch: branchLocal,
-      env: environment,
-      yaml,
-      provider,
-      path,
+    // 👇 Refresh history list
+    const rows = await api.getPipelineHistory({
+      repoFullName,
+      branch: branchName,
+      path: workflowPath,
+      limit: 20,
     });
+    setVersions(rows);
+    setSelectedVersion(rows[0] ?? null);
+
+  } catch (err: any) {
+    console.error("[Dashboard] rollbackPipeline failed:", err);
+    alert(err.message || "Rollback failed");
+  } finally {
+    setRollbackBusy(false);
   }
+}
+
+
+
+async function handleCommitClick() {
+  const repoFullNameLocal = result?.repo || repo;
+  const yaml = currentYaml;
+
+  const branchLocal = (result as any)?.branch || branchName || "main";
+  const provider = "aws";
+  const path = workflowPath;
+
+  if (!repoFullNameLocal || !yaml) {
+    alert("Missing repo or YAML — generate a pipeline first.");
+    return;
+  }
+
+  const res = await startDeploy({
+    repoFullName: repoFullNameLocal,
+    branch: branchLocal,
+    env: environment,
+    yaml,
+    provider,
+    path,
+  });
+
+  // backend response you showed: res.data.commit.html_url
+  const url = res?.data?.commit?.html_url;
+  alert(url ? `Committed ✅\n${url}` : "Committed ✅");
+}
+
 
   return (
     <div className="p-6 space-y-4 max-w-6xl mx-auto">
@@ -183,26 +218,28 @@ export default function DashboardPage() {
                 <ScrollArea className="h-64 rounded-md border bg-slate-950 text-xs font-mono text-slate-100">
                   <div className="p-3">
                     <pre className="whitespace-pre-wrap break-words">
-                      {result?.generated_yaml ?? "No pipeline generated yet."}
+                      {currentYaml || "No pipeline generated yet."}
+
                     </pre>
                   </div>
                 </ScrollArea>
               )}
-
+                
               <div className="flex items-center gap-2 flex-wrap">
                 <Button
-                  size="sm"
-                  disabled={running || !repoFullName || !result?.generated_yaml}
-                  onClick={handleCommitClick}
-                >
-                  {running ? "Committing…" : "Commit to GitHub"}
-                </Button>
+  size="sm"
+  disabled={running || !repoFullName || !canCommitYaml}
+  onClick={handleCommitClick}
+>
+  {running ? "Committing…" : "Commit to GitHub"}
+</Button>
+
                 {running && (
                   <Button size="sm" variant="outline" onClick={stop}>
                     Stop
                   </Button>
                 )}
-                {result?.generated_yaml && (
+                {currentYaml && (
                   <>
                     <Button
                       size="sm"
