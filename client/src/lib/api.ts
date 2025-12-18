@@ -1,5 +1,3 @@
-import { usePipelineStore } from "../store/usePipelineStore";
-
 // In dev: talk to Vite dev server proxy at /api
 // In prod: use the real backend URL from VITE_API_BASE (e.g. https://api.autodeploy.app)
 const DEFAULT_API_BASE =
@@ -7,6 +5,7 @@ const DEFAULT_API_BASE =
 
 export const BASE =
   import.meta.env.VITE_API_BASE || DEFAULT_API_BASE;
+import { usePipelineStore } from "../store/usePipelineStore";
 
 // SERVER_BASE is the same as BASE but without trailing /api,
 // so we can call /mcp and /auth directly.
@@ -519,7 +518,11 @@ export const api = {
       pipelineStore?.repoFullName ||
       (pipelineStore as any)?.result?.repo;
     const selectedBranch = branch || (pipelineStore as any)?.selectedBranch || "main";
-    const yaml = (pipelineStore as any)?.result?.generated_yaml;
+    const yaml =
+  fromCallerYaml ||
+  (pipelineStore as any)?.result?.generated_yaml ||
+  "";
+
     const environment = env || (pipelineStore as any)?.environment || "dev";
 
     const providerFinal = provider || (pipelineStore as any)?.provider || "aws";
@@ -545,6 +548,9 @@ export const api = {
     };
 
     console.log("[Deploy] Final payload:", payload);
+if (!repoFullName) throw new Error("startDeploy: missing repoFullName");
+if (!selectedBranch) throw new Error("startDeploy: missing branch");
+if (!yaml || yaml.trim().length === 0) throw new Error("startDeploy: missing yaml");
 
     const res = await fetch(`${SERVER_BASE}/mcp/v1/pipeline_commit`, {
       method: "POST",
