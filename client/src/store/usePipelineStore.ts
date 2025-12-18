@@ -14,6 +14,8 @@ type PipelineState = {
     testCmd: string;
     buildCmd: string;
     awsRoleArn?: string;
+    awsSessionName?: string;
+    awsRegion?: string;
     gcpServiceAccountEmail?: string;
   };
   provider: "aws" | "gcp" | "jenkins";
@@ -72,6 +74,8 @@ const initial: PipelineState = {
     installCmd: "npm ci",
     testCmd: "npm test",
     buildCmd: "npm run build",
+    awsSessionName: "autodeploy",
+    awsRegion: "us-east-1",
     gcpServiceAccountEmail: "",
   },
   provider: "aws",
