@@ -4,8 +4,9 @@ import { pipeline_generator } from './pipeline_generator.js';
 import { oidc_adapter } from './oidc_adapter.js';
 import { github_adapter } from './github_adapter.js';
 
-// Importing the new GCP tool
+// Importing the new GCP tools
 import { gcp_adapter } from './gcp_adapter.js';
+import { scaffold_generator } from './scaffold_generator.js'; // Dockerfile generator
 
 export const MCP_TOOLS = {
   repo: repo_reader,
@@ -15,9 +16,11 @@ export const MCP_TOOLS = {
   oidc_adapter: oidc_adapter,
   github: github_adapter,
   github_adapter: github_adapter,
-  // Adding the GCP adapter to the MCP tools to be able to call it
+  // Adding the GCP adapter and Docker file generator to the MCP tools list to be able to call it
   gcp: gcp_adapter,
   gcp_adapter: gcp_adapter,
+  scaffold: scaffold_generator,
+  scaffold_generator: scaffold_generator,
 };
 
 // Optional helper for dynamic access

@@ -18,6 +18,8 @@ import authRouter from './routes/authRoutes.js';
 import userRouter from './routes/usersRoutes.js';
 import pipelineCommitRouter from './routes/pipelineCommit.js';
 import pipelineSessionsRouter from './routes/pipelineSessions.js';
+import scaffoldCommitRouter from './routes/scaffoldCommit.js';
+import workflowCommitRouter from './routes/workflowCommit.js';
 // app.use(authRoutes);
 import jenkinsRouter from './routes/jenkins.js';
 
@@ -63,6 +65,8 @@ app.use('/deployments', deploymentsRouter);
 app.use('/agent', agentRouter);
 app.use('/mcp/v1', pipelineCommitRouter);
 app.use('/mcp/v1', mcpRouter);
+app.use('/mcp/v1', scaffoldCommitRouter);
+app.use('mcp/v1', workflowCommitRouter);
 app.use('/auth/github', githubAuthRouter);
 app.use(authRouter);
 // not currently using
