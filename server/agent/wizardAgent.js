@@ -238,7 +238,12 @@ Tell me what you’d like to do next.
       const genericRepo = (userPromptText + ' ' + decision).match(
         /\b(?!ci\/cd\b)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/
       );
-      const repo = labeledRepo?.[1] || genericRepo?.[1] || null;
+      const repo =
+        labeledRepo?.[1] ||
+        genericRepo?.[1] ||
+        pipelineSnapshot?.repo ||
+        globalThis.LAST_REPO_USED ||
+        null;
 
       const labeledProvider =
         userPromptText.match(/\bprovider\s+(aws|jenkins|gcp|azure)\b/i) ||
@@ -303,6 +308,7 @@ Tell me what you’d like to do next.
       }
 
       if (toolName === 'pipeline_generator') {
+        // Only allow pipeline generation if we have a repo context
         if (!repo) {
           console.warn('⚠️ Missing repo context for pipeline generation.');
           return {
@@ -312,22 +318,26 @@ Tell me what you’d like to do next.
           };
         }
 
+        // Build payload strictly from UI/intent, NOT from any AI-generated YAML
         const payload = { repo };
-        if (provider) payload.provider = provider;
-        if (template) payload.template = template;
-
-        // 🔑 Inject authoritative pipeline options from the frontend (Option A)
-        if (pipelineSnapshot?.options) {
-          payload.options = pipelineSnapshot.options;
-        }
-        if (pipelineSnapshot?.stages) {
-          payload.stages = pipelineSnapshot.stages;
+        // 🔒 Template is authoritative from UI snapshot
+        if (pipelineSnapshot?.template) {
+          console.log(`🔒 Template locked from pipeline snapshot: ${pipelineSnapshot.template}`);
+          payload.template = pipelineSnapshot.template;
         }
         if (pipelineSnapshot?.branch) {
           payload.branch = pipelineSnapshot.branch;
         }
-
-        // Fetch GitHub repo details before pipeline generation
+        // Provider locked from pipelineSnapshot if present
+        if (pipelineSnapshot?.provider) {
+          payload.provider = pipelineSnapshot.provider;
+          console.log(`🔒 Provider locked from pipeline snapshot: ${payload.provider}`);
+        } else if (provider) {
+          payload.provider = provider;
+        }
+        // Template explicit or inferred, but UI snapshot is authoritative
+        if (!payload.template && template) payload.template = template;
+        // Fetch GitHub repo details to help infer template/provider if needed
         let repoInfo = null;
         try {
           const info = await callMCPTool(
@@ -345,14 +355,12 @@ Tell me what you’d like to do next.
             err.message
           );
         }
-
         // Merge language or visibility into payload if available
         if (repoInfo?.language && !payload.language)
           payload.language = repoInfo.language.toLowerCase();
         if (repoInfo?.visibility && !payload.visibility)
           payload.visibility = repoInfo.visibility;
-
-        // Infer template if still missing
+        // Infer template ONLY if not provided by UI or user
         if (!payload.template) {
           if (
             repoInfo?.language?.toLowerCase().includes('javascript') ||
@@ -370,13 +378,11 @@ Tell me what you’d like to do next.
           }
           console.log(`🪄 Inferred template: ${payload.template}`);
         }
-
         // --- Auto-correct short template names ---
         if (payload.template === 'node') payload.template = 'node_app';
         if (payload.template === 'python') payload.template = 'python_app';
         if (payload.template === 'container')
           payload.template = 'container_service';
-
         // --- Validate template against allowed values ---
         const allowedTemplates = [
           'node_app',
@@ -391,39 +397,31 @@ Tell me what you’d like to do next.
           );
           payload.template = 'node_app';
         }
-
         // --- Preserve repo context globally ---
         if (!payload.repo && globalThis.LAST_REPO_USED) {
           payload.repo = globalThis.LAST_REPO_USED;
         } else if (payload.repo) {
           globalThis.LAST_REPO_USED = payload.repo;
         }
-
-        // 🔒 Provider locking: if provider was explicitly selected in the UI (pipelineSnapshot),
-        // treat it as authoritative and NEVER override it.
-        if (pipelineSnapshot?.provider) {
-          payload.provider = pipelineSnapshot.provider;
-          console.log(`🔒 Provider locked from pipeline snapshot: ${payload.provider}`);
-        } else if (!payload.provider) {
-          // Only infer provider if none was provided at all
-          payload.provider =
-            repoInfo?.visibility === 'private' ? 'jenkins' : 'aws';
-          console.log(`🧭 Inferred provider: ${payload.provider}`);
+        // --- Add options and stages from pipelineSnapshot only ---
+        if (pipelineSnapshot?.options) {
+          payload.options = pipelineSnapshot.options;
         }
-
+        // 🔐 Authoritative enforcement: AI may suggest, UI decides
+        if (pipelineSnapshot?.stages) {
+          payload.stages = pipelineSnapshot.stages;
+        }
+        // Defensive: ensure AI cannot override stages, only UI/UX
+        // (already enforced above)
         console.log('🧩 Final payload to pipeline_generator:', payload);
         agentMeta.tool_called = 'pipeline_generator';
         const output = await callMCPTool('pipeline_generator', payload, cookie);
-
-        // Extract YAML for confirmation step
+        // Extract YAML for confirmation step (NO AI YAML merging, only backend-generated)
         const generatedYaml =
           output?.data?.data?.generated_yaml ||
-          output?.tool_output?.data?.generated_yaml ||
           null;
-
         // Store YAML globally for future commit step
         globalThis.LAST_GENERATED_YAML = generatedYaml;
-
         // Return confirmation-required structure
         return {
           success: true,
