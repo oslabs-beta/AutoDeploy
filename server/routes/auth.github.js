@@ -53,6 +53,19 @@ router.get('/callback', async (req, res) => {
     const { code, state, error, error_description } = req.query;
     const stateCookie = req.cookies?.oauth_state;
 
+    // If the user is already logged in (local auth), link GitHub to that account
+    // instead of creating/switching the session to the GitHub email identity.
+    let existingSessionUserId = null;
+    const existingSession = req.cookies?.mcp_session;
+    if (existingSession && JWT_SECRET) {
+      try {
+        const decoded = jwt.verify(existingSession, JWT_SECRET);
+        existingSessionUserId = decoded?.user_id || decoded?.id || null;
+      } catch {
+        existingSessionUserId = null;
+      }
+    }
+
     // If GitHub sent back an error (e.g., access_denied), show it
     if (error) {
       console.error('[OAuth callback] GitHub error:', {
@@ -118,17 +131,40 @@ router.get('/callback', async (req, res) => {
     const email =
       (await fetchPrimaryEmail(accessToken)) || ghUser.email || null;
 
-    // Upsert user
-    const { rows: userRows } = await query(
-      `
-      insert into users (email, github_username)
-      values ($1, $2)
-      on conflict (email) do update set github_username = excluded.github_username
-      returning *;
-      `,
-      [email, ghUser.login]
-    );
-    const user = userRows[0];
+    let user;
+
+    if (existingSessionUserId) {
+      // Logged-in linking flow: keep existing session/user email.
+      const { rows: userRows } = await query(
+        `
+        update users
+        set github_username = $2
+        where id = $1
+        returning *;
+        `,
+        [existingSessionUserId, ghUser.login]
+      );
+      user = userRows[0];
+
+      if (!user?.id) {
+        // Fallback: if the session references a non-existent user, revert to normal flow.
+        existingSessionUserId = null;
+      }
+    }
+
+    if (!existingSessionUserId) {
+      // Normal OAuth flow: create/upsert a user identity based on GitHub email.
+      const { rows: userRows } = await query(
+        `
+        insert into users (email, github_username)
+        values ($1, $2)
+        on conflict (email) do update set github_username = excluded.github_username
+        returning *;
+        `,
+        [email, ghUser.login]
+      );
+      user = userRows[0];
+    }
 
     // Upsert connection (store token)
     await query(
@@ -141,26 +177,29 @@ router.get('/callback', async (req, res) => {
       [user.id, accessToken]
     );
 
-    // Issue session cookie
-    const jwtPayload = {
-      user_id: user.id,
-      github_username: ghUser.login,
-      email,
-    };
-    if (!JWT_SECRET) {
-      console.error('[OAuth callback] Missing JWT_SECRET');
-      return res.status(500).send('Server misconfigured: JWT_SECRET missing');
-    }
-    const jwtToken = jwt.sign(jwtPayload, JWT_SECRET, { expiresIn: '10h' });
-
     res.clearCookie('oauth_state');
-    res.cookie('mcp_session', jwtToken, {
-      httpOnly: true,
-      sameSite: 'lax',
-      path: '/',
-      maxAge: 10 * 60 * 60 * 1000, // 10h
-      // secure: true, // enable on HTTPS
-    });
+
+    // Only issue/overwrite the session cookie when the user is not already logged in.
+    if (!existingSessionUserId) {
+      const jwtPayload = {
+        user_id: user.id,
+        github_username: ghUser.login,
+        email,
+      };
+      if (!JWT_SECRET) {
+        console.error('[OAuth callback] Missing JWT_SECRET');
+        return res.status(500).send('Server misconfigured: JWT_SECRET missing');
+      }
+      const jwtToken = jwt.sign(jwtPayload, JWT_SECRET, { expiresIn: '10h' });
+
+      res.cookie('mcp_session', jwtToken, {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 10 * 60 * 60 * 1000, // 10h
+        // secure: true, // enable on HTTPS
+      });
+    }
 
     return res.redirect(FRONTEND_URL);
   } catch (e) {
