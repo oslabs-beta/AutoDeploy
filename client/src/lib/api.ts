@@ -1,11 +1,10 @@
+import { usePipelineStore } from "../store/usePipelineStore";
+
 // In dev: talk to Vite dev server proxy at /api
 // In prod: use the real backend URL from VITE_API_BASE (e.g. https://api.autodeploy.app)
-const DEFAULT_API_BASE =
-  import.meta.env.MODE === "development" ? "/api" : "";
+const DEFAULT_API_BASE = import.meta.env.MODE === "development" ? "/api" : "";
 
-export const BASE =
-  import.meta.env.VITE_API_BASE || DEFAULT_API_BASE;
-import { usePipelineStore } from "../store/usePipelineStore";
+export const BASE = import.meta.env.VITE_API_BASE || DEFAULT_API_BASE;
 
 // SERVER_BASE is the same as BASE but without trailing /api,
 // so we can call /mcp and /auth directly.
@@ -16,14 +15,16 @@ const SERVER_BASE = BASE.endsWith("/api")
 // Generic REST helper for /api/* endpoints
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
     credentials: "include",
     ...opts,
   });
+
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((data as any)?.error || res.statusText);
   return data as T;
 }
+
 
 // Helper for MCP tool calls on the server at /mcp/v1/:tool_name
 async function mcp<T>(
@@ -106,6 +107,8 @@ let cachedRepos: string[] | null = null;
 const cachedBranches = new Map<string, string[]>();
 
 export const api = {
+
+  me: () => request<{ userId: string; email?: string }>("/api/me"),
 
   // ===== Pipeline history + rollback =====
 
