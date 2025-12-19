@@ -9,6 +9,7 @@ import { useRepoStore } from "./store/useRepoStore";
 import { usePipelineStore } from "./store/usePipelineStore";
 import { useAuthStore } from "./store/useAuthStore";
 import { useEffect } from "react";
+import { Button } from "@/components/ui/Button";
 
 function NeedRepo({ children }: { children: JSX.Element }) {
   const { repo, branch } = useRepoStore();
@@ -86,16 +87,17 @@ function AppShell() {
                 </span>
               )}
               {user?.user_id && (
-                <button
-                  type="button"
+                <Button
+                  size="sm"
+                  variant="glass"
                   onClick={async () => {
                     await signOut();
                     navigate("/login", { replace: true });
                   }}
-                  className="text-slate-200/80 hover:text-white transition-colors"
+                  className="px-3 py-1 h-auto"
                 >
                   Log out
-                </button>
+                </Button>
               )}
             </div>
           </nav>

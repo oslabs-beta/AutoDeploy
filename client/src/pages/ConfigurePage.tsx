@@ -241,7 +241,7 @@ export default function ConfigurePage() {
           <section className="space-y-6 rounded-2xl border border-white/20 bg-white/10 backdrop-blur-md shadow-glass p-6 text-white">
             {/* Template */}
             <label className="grid gap-1">
-              <span className="text-sm font-medium text-slate-800">Template</span>
+              <span className="text-sm font-medium text-white">Template</span>
               <select
                 disabled={busy}
                 value={template}
@@ -276,7 +276,7 @@ export default function ConfigurePage() {
 
             {/* Stages */}
             <fieldset className="space-y-2">
-              <legend className="text-sm font-medium text-slate-800">Enabled stages</legend>
+              <legend className="text-sm font-medium text-white">Enabled stages</legend>
               <div className="flex flex-wrap gap-3">
                 {(["build", "test", "deploy"] as const).map((stage) => (
                   <label
@@ -299,7 +299,7 @@ export default function ConfigurePage() {
             {/* Node version + commands */}
             <div className="grid gap-4">
               <label className="grid gap-1">
-                <span className="text-sm font-medium text-slate-800">Node version</span>
+                <span className="text-sm font-medium text-white">Node version</span>
                 <input
                   disabled={busy}
                   value={options.nodeVersion}
@@ -310,7 +310,7 @@ export default function ConfigurePage() {
               </label>
 
               <label className="grid gap-1">
-                <span className="text-sm font-medium text-slate-800">Install command</span>
+                <span className="text-sm font-medium text-white">Install command</span>
                 <input
                   disabled={busy}
                   value={options.installCmd}
@@ -321,7 +321,7 @@ export default function ConfigurePage() {
               </label>
 
               <label className="grid gap-1">
-                <span className="text-sm font-medium text-slate-800">Test command</span>
+                <span className="text-sm font-medium text-white">Test command</span>
                 <input
                   disabled={busy}
                   value={options.testCmd}
@@ -332,7 +332,7 @@ export default function ConfigurePage() {
               </label>
 
               <label className="grid gap-1">
-                <span className="text-sm font-medium text-slate-800">Build command</span>
+                <span className="text-sm font-medium text-white">Build command</span>
                 <input
                   disabled={busy}
                   value={options.buildCmd}
