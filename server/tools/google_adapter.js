@@ -11,6 +11,11 @@ export const google_adapter = {
   // Step 1: Redirect to Google OAuth consent page
   async connect(req, res) {
     try {
+      if (!process.env.GOOGLE_REDIRECT_URI || !process.env.GOOGLE_CLIENT_ID) {
+        console.error('[google_adapter] Missing GOOGLE_REDIRECT_URI or GOOGLE_CLIENT_ID');
+        return res.status(500).json({ error: 'Google OAuth not configured on server' });
+      }
+
       const oauth2Client = new google.auth.OAuth2(
         process.env.GOOGLE_CLIENT_ID,
         process.env.GOOGLE_CLIENT_SECRET,
@@ -26,6 +31,9 @@ export const google_adapter = {
           'profile',
           'https://www.googleapis.com/auth/cloud-platform'
         ],
+        // Preserve redirect target via state
+        state: req.query.redirect_to || '',
+        redirect_uri: process.env.GOOGLE_REDIRECT_URI,
       });
 
       res.redirect(authUrl);
@@ -38,7 +46,12 @@ export const google_adapter = {
   // Step 2: Handle the OAuth callback and store the token
   async callback(req, res) {
     try {
-      const { code } = req.query;
+      if (!process.env.GOOGLE_REDIRECT_URI || !process.env.GOOGLE_CLIENT_ID) {
+        console.error('[google_adapter] Missing GOOGLE_REDIRECT_URI or GOOGLE_CLIENT_ID');
+        return res.status(500).json({ error: 'Google OAuth not configured on server' });
+      }
+
+      const { code, state: redirect_to } = req.query;
 
       if (!code) {
         return res.status(400).json({ error: 'Missing authorization code.' });
@@ -50,7 +63,10 @@ export const google_adapter = {
         process.env.GOOGLE_REDIRECT_URI
       );
 
-      const { tokens } = await oauth2Client.getToken(code);
+      const { tokens } = await oauth2Client.getToken({
+        code,
+        redirect_uri: process.env.GOOGLE_REDIRECT_URI,
+      });
       oauth2Client.setCredentials(tokens);
 
       // Encrypt tokens before storing in DB
@@ -60,6 +76,10 @@ export const google_adapter = {
         'INSERT INTO connections (provider, token) VALUES ($1, $2)',
         ['gcp', encryptedToken]
       );
+
+      if (redirect_to) {
+        return res.redirect(redirect_to);
+      }
 
       res.send('✅ Google Cloud account connected successfully!');
     } catch (error) {

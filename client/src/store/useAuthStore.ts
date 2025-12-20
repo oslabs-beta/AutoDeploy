@@ -18,6 +18,7 @@ type AuthActions = {
   signUp(email: string, password: string): Promise<void>;
   signOut(): Promise<void>;
   startGitHubLogin(redirectTo?: string): void;
+  startGoogleLogin(redirectTo?: string): void;
   clear(): void;
 };
 
@@ -99,6 +100,14 @@ export const useAuthStore = create<AuthState & AuthActions>((set) => ({
     window.location.href = `${SERVER_BASE}/auth/github/start?redirect_to=${encodeURIComponent(
       target
     )}`;
+  },
+
+  startGoogleLogin(redirectTo?: string) {
+    const target = redirectTo || window.location.origin;
+    const url = `${SERVER_BASE}/auth/google?redirect_to=${encodeURIComponent(
+      target
+    )}`;
+    window.location.href = url;
   },
 
   clear() {
