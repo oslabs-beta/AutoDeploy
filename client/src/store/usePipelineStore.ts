@@ -1,8 +1,8 @@
-import { create } from "zustand";
-import { api } from "../lib/api";
-import type { McpPipeline } from "@/types/mcp";
+import { create } from 'zustand';
+import { api } from '../lib/api';
+import type { McpPipeline } from '@/types/mcp';
 
-type Stage = "build" | "test" | "deploy";
+type Stage = 'build' | 'test' | 'deploy';
 
 type PipelineState = {
   // inputs to MCP
@@ -18,7 +18,7 @@ type PipelineState = {
     awsRegion?: string;
     gcpServiceAccountEmail?: string;
   };
-  provider: "aws" | "gcp" | "jenkins";
+  provider: 'aws' | 'gcp' | 'jenkins';
 
   // outputs from MCP
   result?: McpPipeline;
@@ -28,7 +28,7 @@ type PipelineState = {
   roles: { name: string; arn: string }[];
   editing: boolean;
   editedYaml?: string;
-  status: "idle" | "loading" | "success" | "error";
+  status: 'idle' | 'loading' | 'success' | 'error';
   error?: string;
 
   // Have we already loaded roles this session?
@@ -40,11 +40,11 @@ type PipelineState = {
 
 type PipelineActions = {
   setTemplate(t: string): void;
-  setProvider(p: PipelineState["provider"]): void;
+  setProvider(p: PipelineState['provider']): void;
   toggleStage(s: Stage): void;
-  setOption<K extends keyof PipelineState["options"]>(
+  setOption<K extends keyof PipelineState['options']>(
     k: K,
-    v: PipelineState["options"][K]
+    v: PipelineState['options'][K]
   ): void;
 
   loadAwsRoles(): Promise<void>;
@@ -66,52 +66,52 @@ type PipelineActions = {
   setResultYaml(yaml: string): void;
 };
 
-const TEMPLATE_DEFAULT_OPTIONS: Record<string, PipelineState["options"]> = {
+const TEMPLATE_DEFAULT_OPTIONS: Record<string, PipelineState['options']> = {
   node_app: {
-    nodeVersion: "20",
-    installCmd: "npm ci",
-    testCmd: "npm test",
-    buildCmd: "npm run build",
-    awsSessionName: "autodeploy",
-    awsRegion: "us-east-1",
-    gcpServiceAccountEmail: "",
+    nodeVersion: '20',
+    installCmd: 'npm ci',
+    testCmd: 'npm test',
+    buildCmd: 'npm run build',
+    awsSessionName: 'autodeploy',
+    awsRegion: 'us-east-1',
+    gcpServiceAccountEmail: '',
   },
   python_app: {
-    nodeVersion: "",
-    installCmd: "pip install -r requirements.txt",
-    testCmd: "pytest",
-    buildCmd: "",
-    awsSessionName: "autodeploy",
-    awsRegion: "us-east-1",
-    gcpServiceAccountEmail: "",
+    nodeVersion: '',
+    installCmd: 'pip install -r requirements.txt',
+    testCmd: 'pytest',
+    buildCmd: '',
+    awsSessionName: 'autodeploy',
+    awsRegion: 'us-east-1',
+    gcpServiceAccountEmail: '',
   },
   container_service: {
-    nodeVersion: "",
-    installCmd: "",
-    testCmd: "",
-    buildCmd: "",
-    awsSessionName: "autodeploy",
-    awsRegion: "us-east-1",
-    gcpServiceAccountEmail: "",
+    nodeVersion: '',
+    installCmd: '',
+    testCmd: '',
+    buildCmd: '',
+    awsSessionName: 'autodeploy',
+    awsRegion: 'us-east-1',
+    gcpServiceAccountEmail: '',
   },
 };
 
 const initial: PipelineState = {
-  template: "node_app",
-  stages: ["build", "test", "deploy"],
+  template: 'node_app',
+  stages: ['build', 'test', 'deploy'],
   options: {
-    nodeVersion: "20",
-    installCmd: "npm ci",
-    testCmd: "npm test",
-    buildCmd: "npm run build",
-    awsSessionName: "autodeploy",
-    awsRegion: "us-east-1",
-    gcpServiceAccountEmail: "",
+    nodeVersion: '20',
+    installCmd: 'npm ci',
+    testCmd: 'npm test',
+    buildCmd: 'npm run build',
+    awsSessionName: 'autodeploy',
+    awsRegion: 'us-east-1',
+    gcpServiceAccountEmail: '',
   },
-  provider: "aws",
+  provider: 'aws',
   roles: [],
   editing: false,
-  status: "idle",
+  status: 'idle',
   error: undefined,
   rolesLoaded: false, // guards MCP calls
   getEffectiveYaml: () => undefined,
@@ -130,7 +130,8 @@ export const usePipelineStore = create<PipelineState & PipelineActions>()(
         gcpServiceAccountEmail: current.options.gcpServiceAccountEmail,
       };
 
-      const nextDefaults = TEMPLATE_DEFAULT_OPTIONS[t] ?? TEMPLATE_DEFAULT_OPTIONS["node_app"];
+      const nextDefaults =
+        TEMPLATE_DEFAULT_OPTIONS[t] ?? TEMPLATE_DEFAULT_OPTIONS['node_app'];
 
       set({
         template: t,
@@ -168,12 +169,12 @@ export const usePipelineStore = create<PipelineState & PipelineActions>()(
       // never hit the backend again this session.
       if (rolesLoaded) {
         console.log(
-          "[usePipelineStore] Skipping loadAwsRoles - roles already loaded"
+          '[usePipelineStore] Skipping loadAwsRoles - roles already loaded'
         );
         return;
       }
 
-      console.log("[usePipelineStore] Fetching AWS roles from MCP…");
+      console.log('[usePipelineStore] Fetching AWS roles from MCP…');
 
       try {
         const res = await api.listAwsRoles();
@@ -182,14 +183,12 @@ export const usePipelineStore = create<PipelineState & PipelineActions>()(
         const rawRoles = (res as any)?.roles ?? [];
 
         console.log(
-          "[usePipelineStore] Raw roles from api.listAwsRoles:",
+          '[usePipelineStore] Raw roles from api.listAwsRoles:',
           rawRoles
         );
 
         const normalizedRoles = (rawRoles as any[]).map((r: any) =>
-          typeof r === "string"
-            ? { name: r.split("/").pop() ?? r, arn: r }
-            : r
+          typeof r === 'string' ? { name: r.split('/').pop() ?? r, arn: r } : r
         );
 
         set({
@@ -205,11 +204,11 @@ export const usePipelineStore = create<PipelineState & PipelineActions>()(
         }
 
         console.log(
-          "[usePipelineStore] Loaded roles (normalized):",
+          '[usePipelineStore] Loaded roles (normalized):',
           normalizedRoles
         );
       } catch (err) {
-        console.error("[usePipelineStore] Failed to load AWS roles:", err);
+        console.error('[usePipelineStore] Failed to load AWS roles:', err);
         // allow retry later if needed
         set({ roles: [], rolesLoaded: false });
       }
@@ -219,13 +218,13 @@ export const usePipelineStore = create<PipelineState & PipelineActions>()(
     //    PIPELINE GENERATION
     // ============================
     async regenerate({ repo, branch }) {
-      set({ status: "loading", error: undefined });
+      set({ status: 'loading', error: undefined });
       try {
         const { template, stages, options, provider } = get();
         const res = await api.createPipeline({
           repo,
           branch,
-          service: "ci-cd-generator",
+          service: 'ci-cd-generator',
           template,
           provider,
           options: { ...options, stages },
@@ -235,47 +234,44 @@ export const usePipelineStore = create<PipelineState & PipelineActions>()(
           (res as any)?.data?.data?.generated_yaml ||
           (res as any)?.data?.generated_yaml ||
           (res as any)?.generated_yaml ||
-          "";
+          '';
 
         const repoFullName =
-          (res as any)?.data?.data?.repo || (res as any)?.data?.repo || "";
+          (res as any)?.data?.data?.repo || (res as any)?.data?.repo || '';
 
-        console.log(
-          "[usePipelineStore] Captured repoFullName:",
-          repoFullName
-        );
+        console.log('[usePipelineStore] Captured repoFullName:', repoFullName);
 
         set({
           result: { ...(res as any), yaml: generated_yaml, generated_yaml },
           repoFullName,
-          status: "success",
+          status: 'success',
           editing: false,
           editedYaml: undefined,
         });
 
         console.log(
-          "[usePipelineStore] YAML generated:",
+          '[usePipelineStore] YAML generated:',
           generated_yaml.slice(0, 80)
         );
       } catch (e: any) {
-        console.error("[usePipelineStore] regenerate error:", e);
-        set({ status: "error", error: e.message });
+        console.error('[usePipelineStore] regenerate error:', e);
+        set({ status: 'error', error: e.message });
       }
     },
 
     async openPr({ repo, branch }) {
       const r = get().result;
       const yaml = get().editedYaml ?? r?.generated_yaml;
-      const file = (r as any)?.pipeline_name || "ci.yml";
+      const file = (r as any)?.pipeline_name || 'ci.yml';
 
-      if (!yaml) throw new Error("No YAML to open PR with");
+      if (!yaml) throw new Error('No YAML to open PR with');
 
       await api.openPr({
         repo,
         branch,
         path: `.github/workflows/${file}`,
         yaml,
-        title: "Add CI pipeline",
+        title: 'Add CI pipeline',
       });
     },
 
@@ -285,16 +281,16 @@ export const usePipelineStore = create<PipelineState & PipelineActions>()(
           ...(get().result ?? {}),
           generated_yaml: generatedYaml,
           yaml: generatedYaml,
-          pipeline_name: pipelineName ?? "ci.yml",
+          pipeline_name: pipelineName ?? 'ci.yml',
         },
         repoFullName: repo,
-        status: "success",
+        status: 'success',
         editing: false,
         editedYaml: undefined,
       });
 
       console.log(
-        "[usePipelineStore] Hydrated YAML from wizard:",
+        '[usePipelineStore] Hydrated YAML from wizard:',
         generatedYaml.slice(0, 80)
       );
     },
