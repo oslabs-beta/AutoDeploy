@@ -12,6 +12,7 @@ export const pipeline_generator = {
     branch: z.string().default("main"),
     provider: z.enum(["aws", "jenkins", "gcp"]).optional().default("aws"),
     template: z.enum(["node_app", "python_app", "container_service"]),
+    stages: z.array(z.enum(["build", "test", "deploy"])).optional(),
     options: z
       .object({
         nodeVersion: z.string().optional(),
@@ -28,7 +29,7 @@ export const pipeline_generator = {
   }),
 
   // Real handler (queries github_adapter for repo info and generates pipeline config)
-  handler: async ({ repo, branch = 'main', provider = 'aws', template, options }) => {
+  handler: async ({ repo, branch = 'main', provider = 'aws', template, stages, options }) => {
     const normalized = {
       nodeVersion: options?.nodeVersion,
       installCmd: options?.installCmd,
@@ -37,8 +38,9 @@ export const pipeline_generator = {
       awsRoleArn: options?.awsRoleArn,
       awsSessionName: options?.awsSessionName,
       awsRegion: options?.awsRegion,
-      stages: options?.stages,
+      stages: stages ?? options?.stages,
     };
+    normalized.gcpServiceAccountEmail = options?.gcpServiceAccountEmail;
 
     const sessionToken = process.env.MCP_SESSION_TOKEN;
     let decoded = {};
@@ -101,18 +103,6 @@ export const pipeline_generator = {
     // Try DB lookup for GitHub token first
     let githubToken = null;
     try {
-      const normalized = {
-        nodeVersion: options?.nodeVersion,
-        installCmd: options?.installCmd,
-        testCmd: options?.testCmd,
-        buildCmd: options?.buildCmd,
-        awsRoleArn: options?.awsRoleArn,
-        awsSessionName: options?.awsSessionName,
-        awsRegion: options?.awsRegion,
-        gcpServiceAccountEmail: options?.gcpServiceAccountEmail,
-        stages: options?.stages,
-      };
-
       // Handle GCP via adapter
       if (provider === "gcp") {
         const gcpResult = await gcp_adapter.handler({
@@ -145,37 +135,64 @@ export const pipeline_generator = {
       }
 
       // Fallback mock YAML for AWS/Jenkins
-      const generated_yaml = `
-name: CI/CD Pipeline for ${repo}
+      const resolvedStages = Array.isArray(normalized.stages)
+        ? normalized.stages
+        : ["build", "test", "deploy"];
+      const jobs = [];
 
-permissions:
-  id-token: write
-  contents: read
+      if (resolvedStages.includes("build")) {
+        let runtimeSetupStep = "";
+        if (template === "node_app") {
+          runtimeSetupStep = `- name: Setup Node.js
+    uses: actions/setup-node@v4
+    with:
+      node-version: ${normalized.nodeVersion ?? "20"}`;
+        } else if (template === "python_app") {
+          runtimeSetupStep = `- name: Setup Python
+    uses: actions/setup-python@v5
+    with:
+      python-version: "3.x"`;
+        }
 
-on:
-  push:
-    branches:
-      - ${branch}
-jobs:
+        jobs.push(`
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${normalized.nodeVersion ?? "20"}
+      ${runtimeSetupStep}
       - name: Install Dependencies
         run: ${
           normalized.installCmd ??
           (template === "node_app" ? "npm ci" : "pip install -r requirements.txt")
         }
+      - name: Build
+        run: ${
+          normalized.buildCmd ??
+          (template === "node_app" ? "npm run build" : "echo 'No build step'")
+        }
+`);
+      }
+
+      if (resolvedStages.includes("test")) {
+        jobs.push(`
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - name: Run Tests
         run: ${
           normalized.testCmd ?? (template === "node_app" ? "npm test" : "pytest")
         }
+`);
+      }
+
+      if (resolvedStages.includes("deploy")) {
+        const deployNeeds = resolvedStages.includes("test") ? "test" : "build";
+
+        jobs.push(`
   deploy:
-    needs: build
+    needs: ${deployNeeds}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -187,6 +204,23 @@ jobs:
           aws-region: ${normalized.awsRegion ?? "us-east-1"}
       - name: Deploy Application
         run: echo "Deploying ${repo} to AWS..."
+`);
+      }
+
+      const generated_yaml = `
+name: CI/CD Pipeline for ${repo}
+
+permissions:
+  id-token: write
+  contents: read
+
+on:
+  push:
+    branches:
+      - ${branch}
+
+jobs:
+${jobs.join("\n")}
 `;
 
       return {
@@ -198,7 +232,7 @@ jobs:
           provider,
           template,
           options: options || {},
-          stages: normalized.stages ?? ["build", "test", "deploy"],
+          stages: resolvedStages,
           generated_yaml,
           created_at: new Date().toISOString(),
         },

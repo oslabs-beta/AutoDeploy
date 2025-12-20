@@ -70,7 +70,15 @@ export default function ConfigurePage() {
       alert("Pick a repo + branch on the Connect page first.");
       return;
     }
-    await regenerate({ repo, branch });
+
+    await regenerate({
+      repo,
+      branch,
+      template,
+      provider,
+      stages,
+      options,
+    });
   };
 
   const handleOpenPr = async () => {
@@ -95,6 +103,36 @@ export default function ConfigurePage() {
     const trimmed = chatInput.trim();
     if (!trimmed) return;
 
+    // --- Sync AI intent with pipeline stages BEFORE sending to backend ---
+    // The AI is a planner, not an authority. UI state must be updated first.
+    const lower = trimmed.toLowerCase();
+
+    // Reset to defaults first
+    let nextStages: Array<"build" | "test" | "deploy"> = ["build", "test", "deploy"];
+
+    if (lower.includes("just build") || lower.includes("only build")) {
+      nextStages = ["build"];
+    } else if (
+      lower.includes("build and test") ||
+      (lower.includes("build") && lower.includes("test") && !lower.includes("deploy"))
+    ) {
+      nextStages = ["build", "test"];
+    } else if (
+      lower.includes("no deploy") ||
+      lower.includes("without deploy")
+    ) {
+      nextStages = ["build", "test"];
+    }
+
+    // Apply stage changes to the pipeline store
+    (["build", "test", "deploy"] as const).forEach((stage) => {
+      const shouldEnable = nextStages.includes(stage);
+      const isEnabled = stages.includes(stage);
+      if (shouldEnable !== isEnabled) {
+        toggleStage(stage);
+      }
+    });
+
     if (!repo || !branch) {
       alert(
         "Pick a repo + branch on the Connect page first so I can give better suggestions."
@@ -114,7 +152,7 @@ export default function ConfigurePage() {
         template,
         provider,
         branch,
-        stages,
+        stages: nextStages,
         options,
       };
 
@@ -159,9 +197,8 @@ export default function ConfigurePage() {
           pipelineName,
           branch,
           provider,
-          stages,
-          // Keep a copy of the current options in wizard context so follow-up prompts
-          // can reference the selected provider identity (AWS role / GCP service account).
+          // 🔒 Never override stages from backend / metadata
+          stages: pipelineSnapshot.stages,
           options,
         } as any);
       }
@@ -249,8 +286,8 @@ export default function ConfigurePage() {
                 className="rounded-md border border-white/25 bg-white px-3 py-2 text-sm text-slate-900 placeholder-slate-500"
               >
                 <option value="node_app">Node.js app</option>
-                <option value="node_library">Node.js library</option>
-                <option value="react_vite">React/Vite app</option>
+                <option value="python_app">Python App</option>
+                <option value="container_service">Container</option>
               </select>
               <span className="text-xs text-slate-200">
                 Pick the closest match to your repo; the MCP backend refines it.
@@ -296,7 +333,7 @@ export default function ConfigurePage() {
               </div>
             </fieldset>
 
-            {/* Node version + commands */}
+            {/* Runtime version + commands */}
             <div className="grid gap-4">
               <label className="grid gap-1">
                 <span className="text-sm font-medium text-white">Node version</span>
@@ -343,7 +380,7 @@ export default function ConfigurePage() {
               </label>
             </div>
 
-            {provider === "aws" && (
+            {provider === "aws" && stages.includes("deploy") && (
               <>
               <label className="grid gap-1">
                 <span className="text-sm font-medium">AWS Role (OIDC)</span>

@@ -66,6 +66,36 @@ type PipelineActions = {
   setResultYaml(yaml: string): void;
 };
 
+const TEMPLATE_DEFAULT_OPTIONS: Record<string, PipelineState["options"]> = {
+  node_app: {
+    nodeVersion: "20",
+    installCmd: "npm ci",
+    testCmd: "npm test",
+    buildCmd: "npm run build",
+    awsSessionName: "autodeploy",
+    awsRegion: "us-east-1",
+    gcpServiceAccountEmail: "",
+  },
+  python_app: {
+    nodeVersion: "",
+    installCmd: "pip install -r requirements.txt",
+    testCmd: "pytest",
+    buildCmd: "",
+    awsSessionName: "autodeploy",
+    awsRegion: "us-east-1",
+    gcpServiceAccountEmail: "",
+  },
+  container_service: {
+    nodeVersion: "",
+    installCmd: "",
+    testCmd: "",
+    buildCmd: "",
+    awsSessionName: "autodeploy",
+    awsRegion: "us-east-1",
+    gcpServiceAccountEmail: "",
+  },
+};
+
 const initial: PipelineState = {
   template: "node_app",
   stages: ["build", "test", "deploy"],
@@ -91,7 +121,25 @@ export const usePipelineStore = create<PipelineState & PipelineActions>()(
   (set, get) => ({
     ...initial,
 
-    setTemplate: (t) => set({ template: t }),
+    setTemplate: (t) => {
+      const current = get();
+      const preservedProviderFields = {
+        awsRoleArn: current.options.awsRoleArn,
+        awsSessionName: current.options.awsSessionName,
+        awsRegion: current.options.awsRegion,
+        gcpServiceAccountEmail: current.options.gcpServiceAccountEmail,
+      };
+
+      const nextDefaults = TEMPLATE_DEFAULT_OPTIONS[t] ?? TEMPLATE_DEFAULT_OPTIONS["node_app"];
+
+      set({
+        template: t,
+        options: {
+          ...nextDefaults,
+          ...preservedProviderFields,
+        },
+      });
+    },
     setProvider: (p) => set({ provider: p }),
     // setProvider: (p) => set({ provider: p }),
 
