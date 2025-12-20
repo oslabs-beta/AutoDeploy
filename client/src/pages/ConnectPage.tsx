@@ -119,7 +119,7 @@ export default function ConnectPage() {
             disabled={!repo || !branch}
             onClick={() => location.assign("/configure")}
           >
-            Continue ƒ+' Configure
+            Continue to Configure
           </GlassButton>
         </div>
       </div>
