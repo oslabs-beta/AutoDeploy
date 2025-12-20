@@ -64,13 +64,6 @@ export default function LoginPage() {
             >
               Continue with GitHub
             </GlassButton>
-            <GlassButton
-              className="w-full"
-              disabled={loading}
-              onClick={() => startGoogleLogin(`${window.location.origin}/connect`)}
-            >
-              Continue with Google
-            </GlassButton>
           </div>
         </CardContent>
       </Card>
