@@ -231,8 +231,9 @@ async function handleCommitClick() {
   disabled={running || !repoFullName || !canCommitYaml}
   onClick={handleCommitClick}
 >
-  {running ? "Committing…" : "Commit to GitHub"}
+  {running ? "Committing…" : "Commit to GitHub and Deploy to Cloud"}
 </Button>
+
 
                 {running && (
                   <Button size="sm" variant="outline" onClick={stop}>
@@ -407,3 +408,4 @@ async function handleCommitClick() {
     </div>
   );
 }
+
