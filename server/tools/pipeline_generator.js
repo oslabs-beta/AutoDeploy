@@ -1,41 +1,47 @@
-import { github_adapter } from './github_adapter.js';
-// Importing GCP adapter
-import { gcp_adapter } from './gcp_adapter.js';
+import { z } from "zod";
+import { gcp_adapter } from "./gcp_adapter.js";
 
-import { pool } from '../db.js';
-
-import jwt from 'jsonwebtoken';
-
-import { z } from 'zod';
-
+// Simple, dependency-light generator to avoid DB/token failures.
+// Generates mock AWS/Jenkins YAML or delegates to gcp_adapter.
 export const pipeline_generator = {
-  name: 'pipeline_generator',
-  description:
-    'Generate a mock CI/CD YAML configuration for a given repository and provider.',
+  name: "pipeline_generator",
+  description: "Generate a CI/CD YAML configuration for a given repository and provider.",
 
-  // ✅ Input schema for validation
   input_schema: z.object({
     repo: z.string(),
-    branch: z.string().default('main'),
-    provider: z.enum(['aws', 'jenkins', 'gcp']).optional().default('aws'), // Update the provider to include 'gcp'
-    template: z.enum(['node_app', 'python_app', 'container_service']),
+    branch: z.string().default("main"),
+    provider: z.enum(["aws", "jenkins", "gcp"]).optional().default("aws"),
+    template: z.enum(["node_app", "python_app", "container_service"]),
+    stages: z.array(z.enum(["build", "test", "deploy"])).optional(),
     options: z
       .object({
-        run_tests: z.boolean().default(true),
-        include_trivy_scan: z.boolean().default(false),
-        artifact_name: z.string().optional(),
+        nodeVersion: z.string().optional(),
+        installCmd: z.string().optional(),
+        testCmd: z.string().optional(),
+        buildCmd: z.string().optional(),
+        awsRoleArn: z.string().optional(),
+        awsSessionName: z.string().optional(),
+        awsRegion: z.string().optional(),
+        gcpServiceAccountEmail: z.string().optional(),
+        stages: z.array(z.enum(["build", "test", "deploy"])).optional(),
       })
       .optional(),
   }),
 
   // Real handler (queries github_adapter for repo info and generates pipeline config)
-  handler: async ({
-    repo,
-    branch = 'main',
-    provider = 'aws',
-    template,
-    options,
-  }) => {
+  handler: async ({ repo, branch = 'main', provider = 'aws', template, stages, options }) => {
+    const normalized = {
+      nodeVersion: options?.nodeVersion,
+      installCmd: options?.installCmd,
+      testCmd: options?.testCmd,
+      buildCmd: options?.buildCmd,
+      awsRoleArn: options?.awsRoleArn,
+      awsSessionName: options?.awsSessionName,
+      awsRegion: options?.awsRegion,
+      stages: stages ?? options?.stages,
+    };
+    normalized.gcpServiceAccountEmail = options?.gcpServiceAccountEmail;
+
     const sessionToken = process.env.MCP_SESSION_TOKEN;
     let decoded = {};
     let userId = null;
@@ -97,231 +103,143 @@ export const pipeline_generator = {
     // Try DB lookup for GitHub token first
     let githubToken = null;
     try {
-      const { rows } = await pool.query(
-        `SELECT access_token 
-         FROM connections 
-         WHERE user_id = $1 
-         AND provider = 'github' 
-         LIMIT 1`,
-        [userId]
-      );
-
-      if (rows.length > 0 && rows[0].access_token) {
-        githubToken = rows[0].access_token;
-        console.log('🗝️ GitHub token retrieved from DB for user:', userId);
-      } else {
-        console.warn('⚠️ No GitHub access token found for user:', userId);
-      }
-    } catch (dbErr) {
-      console.warn('⚠️ DB lookup failed:', dbErr.message);
-    }
-
-    if (!githubToken) {
-      githubToken =
-        process.env.GITHUB_ACCESS_TOKEN ||
-        decoded?.github_token ||
-        (globalThis.MCP_SESSION?.github_token ?? null);
-    }
-
-    console.log(
-      '🪶 Using GitHub token from source:',
-      githubToken ? 'available' : 'missing'
-    );
-
-    if (!githubToken) {
-      return {
-        success: false,
-        error: 'No GitHub access token found for this user.',
-      };
-    }
-
-    // ✅ Normalize repo path to include username/repo format
-    if (!repo.includes('/')) {
-      let githubUsername =
-        decoded?.github_username || process.env.GITHUB_USERNAME;
-      if (!githubUsername) {
-        try {
-          const { rows: userRows } = await pool.query(
-            `SELECT github_username FROM users WHERE id = $1 LIMIT 1`,
-            [userId]
-          );
-          if (userRows.length > 0) {
-            githubUsername = userRows[0].github_username;
-            console.log(
-              '🧠 Retrieved GitHub username from DB:',
-              githubUsername
-            );
-          } else {
-            console.warn('⚠️ No GitHub username found in DB for user:', userId);
-          }
-        } catch (dbErr) {
-          console.warn(
-            '⚠️ Failed to query DB for GitHub username:',
-            dbErr.message
-          );
-        }
-      }
-
-      if (githubUsername) {
-        repo = `${githubUsername}/${repo}`;
-        console.log('🧩 Normalized repo path:', repo);
-      } else {
-        console.warn(
-          '⚠️ Cannot normalize repo path: no GitHub username found.'
-        );
-      }
-    }
-
-    // Attach token when fetching repo info
-    let repoInfo;
-    try {
-      repoInfo = await github_adapter.handler({
-        action: 'get_repo',
-        user_id: userId,
-        repo,
-        token: githubToken,
-      });
-    } catch (err) {
-      console.warn('⚠️ GitHub API fetch failed:', err.message);
-      repoInfo = null;
-    }
-
-    // ✅ Normalize GitHub adapter return structure
-    if (repoInfo?.data) {
-      repoInfo = repoInfo.data;
-    }
-
-    // If repo info failed, try fallback to github_adapter info or mock data
-    if (!repoInfo) {
-      console.warn(
-        `⚠️ Could not retrieve repository information for ${repo}, attempting fallback...`
-      );
-      try {
-        repoInfo = await github_adapter.handler({
-          action: 'info',
-          user_id: userId,
+      // Handle GCP via adapter
+      if (provider === "gcp") {
+        const gcpResult = await gcp_adapter.handler({
           repo,
-          token: githubToken,
+          branch,
+          ...(options || {}),
         });
-        console.log('🧠 Fallback repo info retrieved successfully.');
-      } catch (fallbackErr) {
-        console.warn(
-          '⚠️ Fallback GitHub info retrieval failed:',
-          fallbackErr.message
-        );
-      }
-    }
 
-    // Final safeguard: if still missing, create mock repo info to continue pipeline generation
-    if (!repoInfo) {
-      console.warn(
-        '⚠️ Both primary and fallback repo info unavailable — using minimal mock data.'
-      );
-      repoInfo = {
-        language: 'JavaScript',
-        visibility: 'public',
-        default_branch: branch,
-      };
-    }
+        if (!gcpResult?.success) {
+          return {
+            success: false,
+            error: gcpResult?.error || "Failed to generate GCP pipeline YAML.",
+          };
+        }
 
-    // Determine defaults dynamically
-    const language = repoInfo.language || 'JavaScript';
-    const inferredTemplate = language.toLowerCase().includes('python')
-      ? 'python_app'
-      : 'node_app';
-
-    const inferredProvider =
-      repoInfo.visibility === 'private' ? 'jenkins' : 'aws';
-
-    const selectedProvider = provider || inferredProvider;
-    const selectedTemplate = template || inferredTemplate;
-
-    const pipelineName = `${selectedProvider}-${selectedTemplate}-ci.yml`;
-
-    // GCP path: generate a real Cloud Run workflow (GHCR -> Artifact Registry -> Cloud Run)
-    // What this does:
-    // If provider is gcp, we stop using the mock YAML
-    // We generate a real Cloud Run pipeline from your new adapter
-    // We return it in the same response shape the app already expects
-
-    if (selectedProvider === 'gcp') {
-      const gcpResult = await gcp_adapter.handler({
-        repo,
-        branch,
-        ...(options || {}),
-      });
-
-      if (!gcpResult?.success) {
         return {
-          success: false,
-          error: gcpResult?.error || 'Failed to generate GCP pipeline YAML.',
+          success: true,
+          data: {
+            pipeline_name: "gcp-cloud-run-ci.yml",
+            repo,
+            branch,
+            provider: "gcp",
+            template,
+            options: options || {},
+            stages: ["build", "deploy"],
+            generated_yaml: gcpResult.data.generated_yaml,
+            created_at: new Date().toISOString(),
+          },
         };
       }
 
-      return {
-        success: true,
-        data: {
-          pipeline_name: 'gcp-cloud-run-ci.yml',
-          repo,
-          branch,
-          provider: 'gcp',
-          template: selectedTemplate,
-          options: options || {},
-          stages: ['build', 'deploy'],
-          generated_yaml: gcpResult.data.generated_yaml,
-          repo_info: repoInfo,
-          created_at: new Date().toISOString(),
-        },
-      };
-    }
+      // Fallback mock YAML for AWS/Jenkins
+      const resolvedStages = Array.isArray(normalized.stages)
+        ? normalized.stages
+        : ["build", "test", "deploy"];
+      const jobs = [];
 
-    const generated_yaml = `
-name: CI/CD Pipeline for ${repo}
-on:
-  push:
-    branches:
-      - ${branch}
-jobs:
+      if (resolvedStages.includes("build")) {
+        let runtimeSetupStep = "";
+        if (template === "node_app") {
+          runtimeSetupStep = `- name: Setup Node.js
+    uses: actions/setup-node@v4
+    with:
+      node-version: ${normalized.nodeVersion ?? "20"}`;
+        } else if (template === "python_app") {
+          runtimeSetupStep = `- name: Setup Python
+    uses: actions/setup-python@v5
+    with:
+      python-version: "3.x"`;
+        }
+
+        jobs.push(`
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup ${selectedTemplate === 'node_app' ? 'Node.js' : 'Python'}
-        uses: actions/setup-${
-          selectedTemplate === 'node_app' ? 'node' : 'python'
-        }@v4
+      ${runtimeSetupStep}
       - name: Install Dependencies
         run: ${
-          selectedTemplate === 'node_app'
-            ? 'npm ci'
-            : 'pip install -r requirements.txt'
+          normalized.installCmd ??
+          (template === "node_app" ? "npm ci" : "pip install -r requirements.txt")
         }
-      - name: Run Tests
-        run: ${selectedTemplate === 'node_app' ? 'npm test' : 'pytest'}
-  deploy:
+      - name: Build
+        run: ${
+          normalized.buildCmd ??
+          (template === "node_app" ? "npm run build" : "echo 'No build step'")
+        }
+`);
+      }
+
+      if (resolvedStages.includes("test")) {
+        jobs.push(`
+  test:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Configure ${selectedProvider.toUpperCase()}
-        run: echo "Configuring ${selectedProvider.toUpperCase()} OIDC..."
+      - uses: actions/checkout@v4
+      - name: Run Tests
+        run: ${
+          normalized.testCmd ?? (template === "node_app" ? "npm test" : "pytest")
+        }
+`);
+      }
+
+      if (resolvedStages.includes("deploy")) {
+        const deployNeeds = resolvedStages.includes("test") ? "test" : "build";
+
+        jobs.push(`
+  deploy:
+    needs: ${deployNeeds}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${normalized.awsRoleArn ?? "REPLACE_ME"}
+          role-session-name: ${normalized.awsSessionName ?? "autodeploy"}
+          aws-region: ${normalized.awsRegion ?? "us-east-1"}
       - name: Deploy Application
-        run: echo "Deploying ${repo} to ${selectedProvider.toUpperCase()}..."
+        run: echo "Deploying ${repo} to AWS..."
+`);
+      }
+
+      const generated_yaml = `
+name: CI/CD Pipeline for ${repo}
+
+permissions:
+  id-token: write
+  contents: read
+
+on:
+  push:
+    branches:
+      - ${branch}
+
+jobs:
+${jobs.join("\n")}
 `;
 
-    return {
-      success: true,
-      data: {
-        pipeline_name: pipelineName,
-        repo,
-        branch,
-        provider: selectedProvider,
-        template: selectedTemplate,
-        options: options || {},
-        stages: ['build', 'test', 'deploy'],
-        generated_yaml,
-        repo_info: repoInfo,
-        created_at: new Date().toISOString(),
-      },
-    };
+      return {
+        success: true,
+        data: {
+          pipeline_name: `${provider}-${template}-ci.yml`,
+          repo,
+          branch,
+          provider,
+          template,
+          options: options || {},
+          stages: resolvedStages,
+          generated_yaml,
+          created_at: new Date().toISOString(),
+        },
+      };
+    } catch (err) {
+      console.error("[pipeline_generator] Unhandled error:", err);
+      return { success: false, error: err.message || "pipeline_generator failed" };
+    }
   },
 };

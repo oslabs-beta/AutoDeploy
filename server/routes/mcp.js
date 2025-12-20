@@ -83,6 +83,15 @@ router.all('/:tool_name', requireSession, async (req, res) => {
   const tool = MCP_TOOLS[tool_name];
   logRequest(req, `/mcp/v1/${tool_name}`);
 
+  // Debug: log what the tool object looks like to catch mis-exports
+  if (!tool || typeof tool.handler !== "function") {
+    console.warn("[MCP] tool missing or has no handler:", {
+      tool_name,
+      tool_keys: tool ? Object.keys(tool) : null,
+      tool_type: typeof tool,
+    });
+  }
+
   if (!tool) {
     return res
       .status(404)

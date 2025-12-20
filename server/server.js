@@ -8,6 +8,7 @@ import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 
 // routes
+import meRouter from "./routes/me.js";
 import authAws from './routes/auth.aws.js';
 import authGoogle from './routes/auth.google.js';
 import mcpRouter from './routes/mcp.js';
@@ -15,6 +16,7 @@ import agentRouter from './routes/agent.js';
 import githubAuthRouter from './routes/auth.github.js';
 import deploymentsRouter from './routes/deployments.js';
 import authRouter from './routes/authRoutes.js';
+import localAuthRouter from "./routes/auth.local.js";
 import userRouter from './routes/usersRoutes.js';
 import pipelineCommitRouter from './routes/pipelineCommit.js';
 import pipelineSessionsRouter from './routes/pipelineSessions.js';
@@ -60,6 +62,7 @@ app.get('/db/ping', async (_req, res) => {
 });
 
 // Routes
+app.use("/api", meRouter);
 app.use('/', userRouter);
 app.use('/deployments', deploymentsRouter);
 app.use('/agent', agentRouter);

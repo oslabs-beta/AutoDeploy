@@ -46,6 +46,16 @@ export const repo_reader = {
         return { success: false, data: null, error: "No GitHub access token found in DB" };
       }
 
+      const buildRepoSummary = (repo, branches = []) => ({
+        name: repo.name,
+        full_name: repo.full_name,
+        default_branch: repo.default_branch,
+        private: repo.private,
+        language: repo.language,
+        html_url: repo.html_url,
+        branches,
+      });
+
       let url;
       if (repo) {
         if (repo.includes("/")) {
@@ -76,21 +86,18 @@ export const repo_reader = {
       const data = await response.json();
 
       if (repo) {
-        // Return detailed info for specific repo
+        const branchesRes = await fetch(data.branches_url.replace("{/branch}", ""), { headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "User-Agent": "AutoDeploy-Agent" }});
+        const branchesData = await branchesRes.json();
+        const branches = Array.isArray(branchesData) ? branchesData.map(b => b.name) : [];
+
         return {
           success: true,
           data: {
-            repository: data,
+            repository: buildRepoSummary(data, branches),
             fetched_at: new Date().toISOString(),
           },
         };
       } else {
-        // Return list of repos
-        if (!Array.isArray(data)) {
-          console.error("Unexpected GitHub API response format for repo list:", data);
-          return { success: false, data: null, error: "Unexpected GitHub API response format" };
-        }
-
         // 🔥 NEW: Persist repositories into github_repos (UPSERT)
         try {
           for (const r of data) {
@@ -149,7 +156,10 @@ export const repo_reader = {
           console.error("Failed to upsert into github_repos:", dbErr);
         }
 
+        const repositories = [];
+
         for (const r of data) {
+          let branches = [];
           try {
             const branchesRes = await fetch(r.branches_url.replace("{/branch}", ""), {
               headers: {
@@ -159,11 +169,12 @@ export const repo_reader = {
               },
             });
             const branchesData = await branchesRes.json();
-            r.branches = Array.isArray(branchesData) ? branchesData.map(b => b.name) : [];
+            branches = Array.isArray(branchesData) ? branchesData.map(b => b.name) : [];
           } catch (err) {
             console.error("Failed to fetch branches for repo:", r.full_name, err);
-            r.branches = [];
           }
+
+          repositories.push(buildRepoSummary(r, branches));
         }
 
         return {
@@ -171,16 +182,7 @@ export const repo_reader = {
           data: {
             provider,
             user: username || "authenticated-user",
-            repositories: data.map(repo => ({
-              name: repo.name,
-              full_name: repo.full_name,
-              branches_url: repo.branches_url,
-              default_branch: repo.default_branch,
-              language: repo.language,
-              private: repo.private,
-              html_url: repo.html_url,
-              branches: repo.branches,
-            })),
+            repositories,
             fetched_at: new Date().toISOString(),
           },
         };

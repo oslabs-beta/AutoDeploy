@@ -14,8 +14,11 @@ type PipelineState = {
     testCmd: string;
     buildCmd: string;
     awsRoleArn?: string;
+    awsSessionName?: string;
+    awsRegion?: string;
+    gcpServiceAccountEmail?: string;
   };
-  provider: "aws" | "jenkins";
+  provider: "aws" | "gcp" | "jenkins";
 
   // outputs from MCP
   result?: McpPipeline;
@@ -37,7 +40,7 @@ type PipelineState = {
 
 type PipelineActions = {
   setTemplate(t: string): void;
-  setProvider(p: "aws" | "jenkins"): void;
+  setProvider(p: PipelineState["provider"]): void;
   toggleStage(s: Stage): void;
   setOption<K extends keyof PipelineState["options"]>(
     k: K,
@@ -52,6 +55,45 @@ type PipelineActions = {
   setEditedYaml(y: string): void;
   resetYaml(): void;
   resetAll(): void;
+
+  hydrateFromWizard(payload: {
+    repo: string;
+    generatedYaml: string;
+    pipelineName?: string;
+  }): void;
+
+  // Allow updating the stored YAML after manual edits (Dashboard)
+  setResultYaml(yaml: string): void;
+};
+
+const TEMPLATE_DEFAULT_OPTIONS: Record<string, PipelineState["options"]> = {
+  node_app: {
+    nodeVersion: "20",
+    installCmd: "npm ci",
+    testCmd: "npm test",
+    buildCmd: "npm run build",
+    awsSessionName: "autodeploy",
+    awsRegion: "us-east-1",
+    gcpServiceAccountEmail: "",
+  },
+  python_app: {
+    nodeVersion: "",
+    installCmd: "pip install -r requirements.txt",
+    testCmd: "pytest",
+    buildCmd: "",
+    awsSessionName: "autodeploy",
+    awsRegion: "us-east-1",
+    gcpServiceAccountEmail: "",
+  },
+  container_service: {
+    nodeVersion: "",
+    installCmd: "",
+    testCmd: "",
+    buildCmd: "",
+    awsSessionName: "autodeploy",
+    awsRegion: "us-east-1",
+    gcpServiceAccountEmail: "",
+  },
 };
 
 const initial: PipelineState = {
@@ -62,6 +104,9 @@ const initial: PipelineState = {
     installCmd: "npm ci",
     testCmd: "npm test",
     buildCmd: "npm run build",
+    awsSessionName: "autodeploy",
+    awsRegion: "us-east-1",
+    gcpServiceAccountEmail: "",
   },
   provider: "aws",
   roles: [],
@@ -76,7 +121,27 @@ export const usePipelineStore = create<PipelineState & PipelineActions>()(
   (set, get) => ({
     ...initial,
 
-    setTemplate: (t) => set({ template: t }),
+    setTemplate: (t) => {
+      const current = get();
+      const preservedProviderFields = {
+        awsRoleArn: current.options.awsRoleArn,
+        awsSessionName: current.options.awsSessionName,
+        awsRegion: current.options.awsRegion,
+        gcpServiceAccountEmail: current.options.gcpServiceAccountEmail,
+      };
+
+      const nextDefaults = TEMPLATE_DEFAULT_OPTIONS[t] ?? TEMPLATE_DEFAULT_OPTIONS["node_app"];
+
+      set({
+        template: t,
+        options: {
+          ...nextDefaults,
+          ...preservedProviderFields,
+        },
+      });
+    },
+    setProvider: (p) => set({ provider: p }),
+    setProvider: (p) => set({ provider: p }),
 
     toggleStage: (s) => {
       const cur = get().stages;
@@ -156,12 +221,13 @@ export const usePipelineStore = create<PipelineState & PipelineActions>()(
     async regenerate({ repo, branch }) {
       set({ status: "loading", error: undefined });
       try {
-        const { template, stages, options } = get();
+        const { template, stages, options, provider } = get();
         const res = await api.createPipeline({
           repo,
           branch,
           service: "ci-cd-generator",
           template,
+          provider,
           options: { ...options, stages },
         });
 
@@ -210,6 +276,37 @@ export const usePipelineStore = create<PipelineState & PipelineActions>()(
         path: `.github/workflows/${file}`,
         yaml,
         title: "Add CI pipeline",
+      });
+    },
+
+    hydrateFromWizard({ repo, generatedYaml, pipelineName }) {
+      set({
+        result: {
+          ...(get().result ?? {}),
+          generated_yaml: generatedYaml,
+          yaml: generatedYaml,
+          pipeline_name: pipelineName ?? "ci.yml",
+        },
+        repoFullName: repo,
+        status: "success",
+        editing: false,
+        editedYaml: undefined,
+      });
+
+      console.log(
+        "[usePipelineStore] Hydrated YAML from wizard:",
+        generatedYaml.slice(0, 80)
+      );
+    },
+
+    setResultYaml(yaml: string) {
+      const r = get().result ?? {};
+      set({
+        result: {
+          ...r,
+          generated_yaml: yaml,
+          yaml,
+        },
       });
     },
 

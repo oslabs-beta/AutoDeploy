@@ -6,7 +6,7 @@ export const oidc_adapter = {
   
   // ✅ Input schema for validation
   input_schema: z.object({
-    provider: z.enum(["aws", "jenkins"]),
+    provider: z.enum(["aws", "jenkins", "gcp"]),
   }),
 
   // ✅ Mock handler (replace with real API calls later)
