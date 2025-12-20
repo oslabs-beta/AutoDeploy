@@ -66,7 +66,7 @@ app.use('/agent', agentRouter);
 app.use('/mcp/v1', pipelineCommitRouter);
 app.use('/mcp/v1', mcpRouter);
 app.use('/mcp/v1', scaffoldCommitRouter);
-app.use('mcp/v1', workflowCommitRouter);
+app.use('/mcp/v1', workflowCommitRouter);
 app.use('/auth/github', githubAuthRouter);
 app.use(authRouter);
 // not currently using

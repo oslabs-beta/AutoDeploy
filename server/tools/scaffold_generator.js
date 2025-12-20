@@ -15,6 +15,7 @@ CMD ["npm", "start"]
 
 function viteFrontendDockerfile() {
   return `
+# ---- build stage ----
 FROM node:20-alpine AS build
 WORKDIR /app
 COPY package*.json ./
@@ -22,10 +23,15 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-FROM nginx:alpine
-COPY --from=build /app/dist /usr/share/nginx/html
+# ---- run stage (Cloud Run friendly) ----
+FROM node:20-alpine
+WORKDIR /app
+RUN npm install -g serve
+COPY --from=build /app/dist /app/dist
+
+# Cloud Run sets PORT=8080
 EXPOSE 8080
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["sh", "-c", "serve -s /app/dist -l \${PORT:-8080}"]
 `.trim();
 }
 

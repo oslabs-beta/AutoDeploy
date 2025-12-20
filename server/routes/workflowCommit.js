@@ -22,6 +22,8 @@ function normalizeRepo(repoUrlOrFullName) {
   return `${parts[0]}/${parts[1]}`;
 }
 
+console.log('workflowCommit router loaded');
+
 router.post('/scaffold/workflow', requireSession, async (req, res) => {
   try {
     const {
@@ -30,7 +32,7 @@ router.post('/scaffold/workflow', requireSession, async (req, res) => {
       branch = 'main',
 
       // GCP settings
-      projectId = 'osp-dev-480003',
+      projectId = 'my-app-dev-481702',
       region = 'us-east1',
       artifactRepo = 'autodeploy',
 
@@ -63,13 +65,35 @@ router.post('/scaffold/workflow', requireSession, async (req, res) => {
     const [owner, repo] = normalized.split('/');
 
     const result = await gcp_adapter.handler({
-      projectId,
-      region,
-      artifactRepo,
-      backendService,
-      frontendService,
-      backendPath,
-      frontendPath,
+      branch,
+
+      // GCP project config (schema-aligned)
+      gcp_project_id: projectId,
+      gcp_region: region,
+
+      // Cloud Run services
+      backend_service: backendService,
+      frontend_service: frontendService,
+
+      // Artifact Registry (Option A: single repo)
+      backend_ar_repo: artifactRepo,
+      frontend_ar_repo: artifactRepo,
+
+      // Image names
+      backend_image_name: backendService,
+      frontend_image_name: frontendService,
+
+      // Repo layout (matches my-app)
+      backend_context: backendPath,
+      frontend_context: frontendPath,
+      backend_dockerfile: `${backendPath}/Dockerfile`,
+      frontend_dockerfile: `${frontendPath}/Dockerfile`,
+
+      // Ports (Cloud Run default)
+      backend_port: 8080,
+      frontend_port: 8080,
+
+      generate_dockerfiles: false,
     });
 
     if (!result?.success || !result?.data?.generated_yaml) {
