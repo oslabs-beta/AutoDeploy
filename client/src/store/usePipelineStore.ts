@@ -141,7 +141,7 @@ export const usePipelineStore = create<PipelineState & PipelineActions>()(
       });
     },
     setProvider: (p) => set({ provider: p }),
-    setProvider: (p) => set({ provider: p }),
+    // setProvider: (p) => set({ provider: p }),
 
     toggleStage: (s) => {
       const cur = get().stages;
