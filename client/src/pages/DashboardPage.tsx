@@ -6,7 +6,7 @@ import { useDeployStore } from "../store/useDeployStore";
 import { api, PipelineVersion } from "../lib/api";
 
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 

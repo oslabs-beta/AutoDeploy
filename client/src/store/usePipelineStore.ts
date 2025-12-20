@@ -93,7 +93,7 @@ export const usePipelineStore = create<PipelineState & PipelineActions>()(
 
     setTemplate: (t) => set({ template: t }),
     setProvider: (p) => set({ provider: p }),
-    setProvider: (p) => set({ provider: p }),
+    // setProvider: (p) => set({ provider: p }),
 
     toggleStage: (s) => {
       const cur = get().stages;

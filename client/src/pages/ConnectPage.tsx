@@ -29,8 +29,8 @@ export default function ConnectPage() {
   };
 
   useEffect(() => {
-    refreshMe().catch(() => undefined);
-  }, [refreshMe]);
+    void refreshMe();
+  }, []);
 
   return (
     <div className="max-w-3xl mx-auto p-6 mt-10">
@@ -126,4 +126,3 @@ export default function ConnectPage() {
     </div>
   );
 }
-
