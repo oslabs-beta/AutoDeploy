@@ -7,7 +7,7 @@ import { useNavigate } from "react-router-dom";
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { signIn, signUp, loading, error } = useAuthStore();
+  const { signIn, signUp, startGitHubLogin, startGoogleLogin, loading, error } = useAuthStore();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -53,6 +53,16 @@ export default function LoginPage() {
               }}
             >
               {loading ? "Creating account..." : "Create account"}
+            </GlassButton>
+          </div>
+
+          <div className="pt-4 grid gap-2">
+            <GlassButton
+              className="w-full"
+              disabled={loading}
+              onClick={() => startGitHubLogin(`${window.location.origin}/connect`)}
+            >
+              Continue with GitHub
             </GlassButton>
           </div>
         </CardContent>

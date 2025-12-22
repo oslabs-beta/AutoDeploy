@@ -8,7 +8,7 @@ import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 
 // routes
-import meRouter from "./routes/me.js";
+import meRouter from './routes/me.js';
 import authAws from './routes/auth.aws.js';
 import authGoogle from './routes/auth.google.js';
 import mcpRouter from './routes/mcp.js';
@@ -16,7 +16,7 @@ import agentRouter from './routes/agent.js';
 import githubAuthRouter from './routes/auth.github.js';
 import deploymentsRouter from './routes/deployments.js';
 import authRouter from './routes/authRoutes.js';
-import localAuthRouter from "./routes/auth.local.js";
+import localAuthRouter from './routes/auth.local.js';
 import userRouter from './routes/usersRoutes.js';
 import systemBannerRouter from './routes/systemBanner.js';
 import pipelineCommitRouter from './routes/pipelineCommit.js';
@@ -98,8 +98,8 @@ app.use('/agent', agentRouter);
 app.use('/mcp/v1', pipelineCommitRouter);
 app.use('/mcp/v1', mcpRouter);
 app.use('/mcp/v1', scaffoldCommitRouter);
-app.use('mcp/v1', workflowCommitRouter);
-app.use("/auth/local", localAuthRouter);
+app.use('/mcp/v1', workflowCommitRouter);
+app.use('/auth/local', localAuthRouter);
 app.use('/auth/github', githubAuthRouter);
 app.use(authRouter);
 // not currently using

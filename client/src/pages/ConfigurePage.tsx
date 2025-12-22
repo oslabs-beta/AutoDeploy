@@ -278,7 +278,7 @@ export default function ConfigurePage() {
           <section className="space-y-6 rounded-2xl border border-white/20 bg-white/10 backdrop-blur-md shadow-glass p-6 text-white">
             {/* Template */}
             <label className="grid gap-1">
-              <span className="text-sm font-medium text-slate-800">Template</span>
+              <span className="text-sm font-medium text-white">Template</span>
               <select
                 disabled={busy}
                 value={template}
@@ -313,7 +313,7 @@ export default function ConfigurePage() {
 
             {/* Stages */}
             <fieldset className="space-y-2">
-              <legend className="text-sm font-medium text-slate-800">Enabled stages</legend>
+              <legend className="text-sm font-medium text-white">Enabled stages</legend>
               <div className="flex flex-wrap gap-3">
                 {(["build", "test", "deploy"] as const).map((stage) => (
                   <label
@@ -335,93 +335,49 @@ export default function ConfigurePage() {
 
             {/* Runtime version + commands */}
             <div className="grid gap-4">
-              {/* Node.js version: only show for node_app AND build stage enabled */}
-              {template === "node_app" && stages.includes("build") && (
-                <label className="grid gap-1">
-                  <span className="text-sm font-medium text-slate-800">Node.js version</span>
-                  <input
-                    disabled={busy}
-                    value={options.nodeVersion}
-                    onChange={(e) => setOption("nodeVersion", e.target.value)}
-                    className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
-                    placeholder="20"
-                  />
-                </label>
-              )}
+              <label className="grid gap-1">
+                <span className="text-sm font-medium text-white">Node version</span>
+                <input
+                  disabled={busy}
+                  value={options.nodeVersion}
+                  onChange={(e) => setOption("nodeVersion", e.target.value)}
+                  className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                  placeholder="20"
+                />
+              </label>
 
-              {/* Install command: only show if build stage enabled */}
-              {stages.includes("build") && (
-                <label className="grid gap-1">
-                  <span className="text-sm font-medium text-slate-800">
-                    {template === "node_app"
-                      ? "Install command (npm)"
-                      : template === "python_app"
-                      ? "Install command (pip)"
-                      : "Install command"}
-                  </span>
-                  <input
-                    disabled={busy}
-                    value={options.installCmd}
-                    onChange={(e) => setOption("installCmd", e.target.value)}
-                    className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
-                    placeholder={
-                      template === "node_app"
-                        ? "npm ci"
-                        : template === "python_app"
-                        ? "pip install -r requirements.txt"
-                        : ""
-                    }
-                  />
-                </label>
-              )}
+              <label className="grid gap-1">
+                <span className="text-sm font-medium text-white">Install command</span>
+                <input
+                  disabled={busy}
+                  value={options.installCmd}
+                  onChange={(e) => setOption("installCmd", e.target.value)}
+                  className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                  placeholder="npm ci"
+                />
+              </label>
 
-              {/* Test command: only show if test stage enabled */}
-              {stages.includes("test") && (
-                <label className="grid gap-1">
-                  <span className="text-sm font-medium text-slate-800">
-                    {template === "node_app"
-                      ? "Test command (npm)"
-                      : template === "python_app"
-                      ? "Test command (pytest)"
-                      : "Test command"}
-                  </span>
-                  <input
-                    disabled={busy}
-                    value={options.testCmd}
-                    onChange={(e) => setOption("testCmd", e.target.value)}
-                    className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
-                    placeholder={
-                      template === "node_app"
-                        ? "npm test"
-                        : template === "python_app"
-                        ? "pytest"
-                        : ""
-                    }
-                  />
-                </label>
-              )}
+              <label className="grid gap-1">
+                <span className="text-sm font-medium text-white">Test command</span>
+                <input
+                  disabled={busy}
+                  value={options.testCmd}
+                  onChange={(e) => setOption("testCmd", e.target.value)}
+                  className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                  placeholder="npm test"
+                />
+              </label>
 
-              {/* Build command: only show if build stage enabled */}
-              {stages.includes("build") && (
-                <label className="grid gap-1">
-                  <span className="text-sm font-medium text-slate-800">
-                    {template === "node_app"
-                      ? "Build command (npm)"
-                      : "Build command"}
-                  </span>
-                  <input
-                    disabled={busy}
-                    value={options.buildCmd}
-                    onChange={(e) => setOption("buildCmd", e.target.value)}
-                    className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
-                    placeholder={
-                      template === "node_app"
-                        ? "npm run build"
-                        : ""
-                    }
-                  />
-                </label>
-              )}
+              <label className="grid gap-1">
+                <span className="text-sm font-medium text-white">Build command</span>
+                <input
+                  disabled={busy}
+                  value={options.buildCmd}
+                  onChange={(e) => setOption("buildCmd", e.target.value)}
+                  className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                  placeholder="npm run build"
+                />
+              </label>
             </div>
 
             {provider === "aws" && stages.includes("deploy") && (
@@ -500,16 +456,6 @@ export default function ConfigurePage() {
               >
                 {busy ? "Generating…" : "Generate pipeline"}
               </button>
-
-              <button
-                type="button"
-                onClick={handleOpenPr}
-                disabled={!result || !yaml}
-                className="rounded-md border border-white/40 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Open PR with YAML
-              </button>
-
               {status === "success" && (
                 <span className="text-xs text-emerald-200">
                   YAML ready — review or edit below, then open a PR.

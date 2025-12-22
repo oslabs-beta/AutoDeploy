@@ -6,7 +6,7 @@ import { useDeployStore } from "../store/useDeployStore";
 import { api, PipelineVersion } from "../lib/api";
 
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -231,8 +231,9 @@ async function handleCommitClick() {
   disabled={running || !repoFullName || !canCommitYaml}
   onClick={handleCommitClick}
 >
-  {running ? "Committing…" : "Commit to GitHub"}
+  {running ? "Committing…" : "Commit to GitHub and Deploy to Cloud"}
 </Button>
+
 
                 {running && (
                   <Button size="sm" variant="outline" onClick={stop}>
@@ -407,3 +408,4 @@ async function handleCommitClick() {
     </div>
   );
 }
+

@@ -1,204 +1,226 @@
-```# AutoDeploy
-Auto-Generated Secure CI/CD Pipelines with AI + MCP
+# AutoDeploy
 
+Auto-Generated Secure CI/CD Pipelines with AI + MCP.
 
-General plan for file structure:
+AutoDeploy is a full‑stack project that helps you analyze repositories, generate CI/CD workflows, and safely track and roll back deployments using an AI‑assisted MCP (Model Context Protocol) backend and a React wizard frontend.
 
-mcp-ci-cd-builder/
-├── client/                # React + Tailwind + Zustand frontend (Victoria)
-│   ├── src/
-│   ├── public/
-│   └── package.json
-├── server/                # MCP orchestrator + adapters (Lorenc)
-│   ├── src/
-│   ├── package.json
-│   └── mcp.config.json
-├── infra/                 # AWS OIDC + GitHub Actions workflows (Alex)
-│   ├── workflows/
-│   └── terraform/ or aws-oidc.yml
-├── tests/                 # Shared test utilities (Paython)
-│   ├── integration/
-│   └── unit/
-├── .github/
-│   └── workflows/
-│       └── ci.yml
-├── README.md
-└── .env.example
+---
 
-Added by Lorenc - the file structure of the backend and the current back end flow:
+## Table of Contents
 
-sequenceDiagram
-Frontend ->> Backend: GET /auth/github/start
-Backend ->> GitHub: Redirect user to OAuth consent
-GitHub ->> Backend: Redirect back with code & state
-Backend ->> GitHub: POST /login/oauth/access_token
-GitHub ->> Backend: Returns access_token
-Backend ->> GitHub: GET /user, GET /user/emails
-Backend ->> Supabase: Upsert users + connections
-Backend ->> Frontend: Redirect / JSON success
+- [Features](#features)
+- [Architecture](#architecture)
+  - [Backend](#backend)
+  - [MCP tools](#mcp-tools)
+  - [Frontend](#frontend)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Installation](#installation)
+  - [Running the backend](#running-the-backend)
+  - [Running the frontend](#running-the-frontend)
+  - [Running the MCP mock core and agent](#running-the-mcp-mock-core-and-agent)
+- [Environment Configuration](#environment-configuration)
+- [Testing](#testing)
+- [Project Structure](#project-structure)
+- [License](#license)
 
-AutoDeploy/
-│
-├── server/                      # main backend service
-    └── lib/
-       └── github-oauth.js      # helper functions for GitHub API
-       ├── state.js             # CSRF state store (in-memory)
-    ├── routes/
-        └── auth.github.js       # all GitHub OAuth + /me routes
-		└── deployments.js
-		└── usersRoutes
-   ├── server.js                # Express bootstrap & route mounting
-   ├── db.js                    # pg Pool + query() + healthCheck()
+---
 
-├── .env                         # environment variables (GitHub, DB)
-├── package.json / lock.json
-├── .gitignore
-└── (optional) client/           # frontend or test scripts
+## Features
 
- Includes:
-	•	CSRF protection via state (in-memory store).
-	•	Token exchange & user fetch with live GitHub API calls.
-	•	Upsert logic for both users and connections (idempotent).
-	•	Sanity check before using any stored token.
+- GitHub OAuth integration to securely link a GitHub account and fetch repository information.
+- Repository analysis and CI/CD pipeline generation via MCP tools.
+- Pipeline commit, history, and rollback for GitHub Actions workflow YAMLs.
+- Deployment logging with retry/rollback support and workflow dispatch APIs.
+- React + TypeScript wizard UI for configuring providers, templates, secrets, and deployments.
 
-FUNCTIONAL STATUS:
-+-------------------+------------+-------------------------------------------------------------+
-| Component         | Status     | Notes                                                       |
-+-------------------+------------+-------------------------------------------------------------+
-| Express app       | ✅ Working | Clean middleware (CORS, Helmet, JSON, logging)              |
-| DB connection     | ✅ Working | Postgres via Supabase connection string                     |
-| /health           | ✅ Working | Returns uptime                                              |
-| /db/ping          | ✅ Working | Validates DB connectivity                                   |
-| /users (POST/GET) | ✅ Working | Basic user CRUD                                             |
-| /auth/github/*    | ✅ Working | OAuth flow complete                                         |
-| /auth/github/me   | ✅ Working | Token sanity check + GitHub user info                       |
-+-------------------+------------+-------------------------------------------------------------+
+## Architecture
 
-Deployment Logs API
+### Backend
 
-Overview:
-This Deployment Logs API provides a lightweight, flexible way to record, update, and retrieve deployment acitvity from GitHub Actions or other CI/CD providers.
-It's designed to power the MCP CI/CD Builder's deployment tracking and reporting system.
+The backend lives under `server/` and is an Express application (ESM) that exposes both REST and MCP‑style endpoints.
 
-The schema covers:
-	-Status tracking (queued, running, success, failed, canceled)
-	-Basic context (provider, repo_full_name, environment, branch)
-	-Timing data (created_at, finished_at, duration_ms)
-	-Flexible metadata fir provider-specific details (GitHub run IDs, AWS region)
+Key entry point:
 
-API Endpoints
+- `server/server.js` – bootstraps the Express app, middleware, and routes.
 
-POST
-/deployments
-Create a new deployment record (status = queued).
+Important route groups include:
 
-PATCH
-/deployments/:id/status
-Update deployment status and merge metadata.
+- `GET /health` – basic health check (used by the smoke test).
+- `GET /db/ping` – checks database connectivity via `healthCheck()` in `server/db.js`.
+- `/auth/github/*` – GitHub OAuth flow plus `/auth/github/me` inspection.
+- `/auth/local/*`, `/auth/google/*` – additional auth flows.
+- `/api/me` – session introspection (uses `requireSession`).
+- `/users`, `/connections` – basic user and connection CRUD backed by Postgres.
+- `/deployments/*` – deployment logs API, including retry, rollback, and workflow dispatch.
+- `/agent/*` – higher‑level "wizard" orchestration endpoints.
+- `/mcp/v1/*` – MCP tool façade (see below).
+- `/pipeline-sessions/*` – multi‑step pipeline wizard backed by Supabase tables.
 
-GET
-/deployments
-List deployments (filter by repo, environment, or status).
+The backend expects a Postgres database (e.g., via a Supabase connection string) configured in `server/db.js`.
 
-GET
-/deployments/:id
-Retrieve a single deployment record by ID.
+### MCP tools
 
-----------------------------------------------------------------------------------------------------
+Internal MCP tools are registered in `server/tools/index.js` and exposed over HTTP through `server/routes/mcp.js` at `/mcp/v1/:tool_name`.
 
-🔁 Deployment Retry & Rollback
+Notable tools:
 
-🧩 Overview
+- `repo`, `repo_reader` → repository discovery and branch listing.
+- `pipeline_generator` → synthesizes CI/CD workflow YAML.
+- `oidc`, `oidc_adapter` → handles AWS OIDC roles and related configuration.
+- `github`, `github_adapter` → GitHub automation (e.g., file upserts, workflow dispatch).
+- `gcp`, `gcp_adapter`, `scaffold`, `scaffold_generator` → GCP‑specific workflow scaffolding.
 
-The Retry & Rollback system extends the existing Deployment Logs API by adding the ability to:
-	•	🔁 Retry a failed or flaky deployment using the same commit (commit_sha).
-	•	⏮️ Rollback to a previously known-good commit.
-	•	🧠 Automatically track these events in the deployment_logs table with clear action types:
-deploy, retry, and rollback.
+Each tool defines an `input_schema` (Zod) and a `handler` function. The `mcp` route:
 
-Each new action creates its own immutable record, preserving the complete deployment history and lineage.
+- Injects `user_id` and `github_username` from the current session.
+- Validates input using the tool’s schema.
+- Normalizes responses to `{ success: true/false, data | error }`.
 
+### Frontend
 
-Endpoints
+The frontend lives under `client/` and is a React + TypeScript app built with Vite and Tailwind.
 
-POST
-/deployments/:id/retry
-Retries a previous deployment by ID. Creates a new queued record using the same commit, repo, and environment.
+Key elements:
 
-POST
-/deployments/rollback
-Manually rolls back to a specific commit (commit_sha).
+- Pages and routes in `client/src/pages` and `client/src/routes` implement the connect/login flow, configuration wizard, secrets management, Jenkins page, dashboard, and 404.
+- Zustand stores in `client/src/store` (e.g., `usePipelineStore`, `useWizardStore`, `useDeployStore`, `useAuthStore`) hold wizard selections, auth/session info, pipeline generation results, and deployment data.
+- `client/src/lib/api.ts` wraps REST and MCP calls, handles GitHub OAuth redirects, caches AWS roles and repo lists, and orchestrates pipeline commit and rollback.
+- UI components under `client/src/components` include shared primitives (`ui/`), layout and nav (`common/`), wizard steps (`wizard/`), and dashboard widgets (`dashboard/`).
 
-POST
-/deployments/rollback/last-success
-Automatically rolls back to the last successful commit for the same repository and environment.
+In development, the frontend talks to the backend through a Vite dev server proxy:
 
----------------------------------------------------------------------------------------------------
+- `BASE = import.meta.env.VITE_API_BASE || "/api"`
+- In dev, `BASE` is typically `/api`, which is proxied to the Express backend.
+- `SERVER_BASE` is derived from `BASE` for direct `/mcp/v1/*` and `/auth/*` calls.
 
-Database changes
+## Getting Started
 
-ALTER TABLE public.deployment_logs
-  ADD COLUMN IF NOT EXISTS action TEXT NOT NULL DEFAULT 'deploy',  -- deploy | retry | rollback
-  ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES public.deployment_logs(id);
+### Prerequisites
 
+- Node.js and npm installed.
+- A Postgres database (e.g., Supabase) for the backend.
+- A GitHub OAuth app for GitHub integration.
 
----------------------------------------------------------------------------------------------------
+### Installation
 
-🧠 How It Works
-	•	Every retry or rollback creates a new row in deployment_logs.
-	•	The parent_id field links back to the original deployment for traceability.
-	•	The action field indicates intent:
-	•	deploy → new deployment
-	•	retry → same commit, new attempt
-	•	rollback → revert to previous commit
-	•	status starts as queued and can transition to running, success, or failed using the /deployments/:id/status endpoint.
+From the repo root, install backend dependencies:
 
-
-                           ┌───────────────────────────────┐
-                           │        User / API Call        │
-                           └──────────────┬────────────────┘
-                                          │
-                                          ▼
-                          ┌──────────────────────────────────┐
-                          │     Express Backend (API)        │
-                          │  /deployments /rollback /retry   │
-                          └──────────────┬───────────────────┘
-                                         │
-               ┌─────────────────────────┼─────────────────────────┐
-               │                         │                         │
-               ▼                         ▼                         ▼
-     ┌────────────────┐       ┌──────────────────┐       ┌────────────────┐
-     │  deploy (new)  │       │   retry (same)   │       │ rollback (old) │
-     │ action=deploy  │       │ action=retry     │       │ action=rollback│
-     └────────────────┘       └──────────────────┘       └────────────────┘
-               │                         │                         │
-               └──────────────┬──────────┴──────────┬──────────────┘
-                              ▼                     ▼
-                      ┌─────────────────────────────────────┐
-                      │      Supabase deployment_logs       │
-                      │  - repo_full_name, environment      │
-                      │  - branch, commit_sha               │
-                      │  - status, action, parent_id        │
-                      │  - metadata (extra info)            │
-                      └─────────────────────────────────────┘
-                                          │
-                                          ▼
-                            ┌────────────────────────────┐
-                            │     GitHub Actions API     │
-                            │  (workflow_dispatch call)  │
-                            └──────────────┬─────────────┘
-                                           │
-                                           ▼
-                               ┌──────────────────────────┐
-                               │   Deploy Workflow Runs   │
-                               │ (build, test, release)   │
-                               └──────────────────────────┘
-
-Adding this line to test the workflows
-Another test2
-test3
-test 4
-  // "build": "tsc -b && vite build",,,
-
-Test
+```bash
+npm install
 ```
+
+Then install frontend dependencies:
+
+```bash
+cd client
+npm install
+```
+
+### Running the backend
+
+From the repo root:
+
+```bash
+# Start backend in watch mode (Express + Nodemon)
+npm run dev
+
+# Start backend in production mode
+npm start
+```
+
+By default the server listens on `PORT` or `3000`.
+
+### Running the frontend
+
+From the `client/` directory:
+
+```bash
+cd client
+npm run dev
+```
+
+The Vite dev server defaults to port `5173`.
+
+### Running the MCP mock core and agent
+
+For local development of the MCP integration without a real MCP core, you can use the mock server and standalone agent under `server/src`.
+
+From the `server/` directory:
+
+```bash
+# 1. Start the mock MCP core (expects Bearer dev-key-123)
+cd server
+node src/scripts/mockMcp.js
+
+# 2. Run the MCP agent directly (uses MCP_URL and MCP_API_KEY)
+node src/agents/mcpAgent.js
+```
+
+Example `.env` values for this flow (placed in `server/.env` or the repo root):
+
+```bash
+MCP_URL=http://localhost:7070
+MCP_API_KEY=dev-key-123
+```
+
+## Environment Configuration
+
+The backend uses `dotenv` and environment variables for configuration.
+
+Key variables include (non‑exhaustive):
+
+- **MCP integration** (`server/src/config/env.js`)
+  - `MCP_URL` – URL of the MCP core (default `http://localhost:7000`).
+  - `MCP_API_KEY` – API key used in `Authorization: Bearer` headers.
+- **GitHub OAuth** (`server/routes/auth.github.js`)
+  - `GITHUB_CLIENT_ID`
+  - `GITHUB_CLIENT_SECRET`
+  - `GITHUB_OAUTH_REDIRECT_URI`
+  - `GITHUB_OAUTH_SCOPES`
+  - `FRONTEND_URL` – post‑login redirect (default `http://localhost:5173/connect`).
+  - `JWT_SECRET` – used to sign the `mcp_session` cookie.
+- **Server**
+  - `PORT` – Express listen port (default `3000`).
+  - Database connection settings (see `server/db.js`), typically a Postgres connection string.
+
+Authentication/session details:
+
+- A JWT‑based session is stored in an `mcp_session` cookie.
+- `server/lib/requireSession.js` reads this cookie and sets `req.user` and `req.supabase`.
+- Most MCP and deployment‑related routes require a valid session.
+
+## Testing
+
+From the repo root, run the smoke test (requires the backend to be running locally):
+
+```bash
+npm test
+```
+
+This runs `node test/smoke.test.js`, which calls `GET /health` on the backend and fails if the response is not `{ ok: true }`.
+
+## Project Structure
+
+High‑level layout:
+
+```text
+AutoDeploy/
+├── client/              # React + TypeScript + Vite frontend
+│   └── src/             # Pages, routes, components, stores, lib, styles, etc.
+├── server/              # Express backend, MCP tools, auth, deployment logging
+│   ├── server.js        # Main Express entry point
+│   ├── db.js            # Postgres connection & health check
+│   ├── routes/          # Auth, MCP, deployments, pipeline sessions, Jenkins, etc.
+│   ├── lib/             # Session, GitHub helpers, pipelineVersions, Supabase helpers
+│   ├── tools/           # MCP tools (repo_reader, pipeline_generator, oidc_adapter, ...)
+│   └── src/             # MCP agent, config, mock MCP server, backend docs
+├── test/
+│   └── smoke.test.js    # Simple /health smoke test
+├── package.json          # Root scripts (dev, start, test) and backend deps
+└── client/package.json   # Frontend scripts (dev, build, lint, preview)
+```
+
+## License
+
+This project is licensed under the **ISC License** (see `package.json`).
