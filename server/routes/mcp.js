@@ -2,41 +2,11 @@ import express from 'express';
 import { MCP_TOOLS } from '../tools/index.js';
 import { requireSession } from '../lib/requireSession.js';
 import { Actions, requireCapability } from '../lib/authorization.js';
+import { ApiError, sendErrorV1, sendSuccessV1 } from '../lib/httpEnvelope.js';
 
 const router = express.Router();
 
-// --- Response helpers ---
-const sendSuccess = (req, res, data, status = 200) =>
-  res.status(status).json({ success: true, data, request_id: req.requestId });
 
-const sendError = (
-  req,
-  res,
-  status = 500,
-  code = 'INTERNAL',
-  message = 'Internal error',
-  details = undefined
-) =>
-  res
-    .status(status)
-    .json({ success: false, error: { code, message, details }, request_id: req.requestId });
-
-const mapError = (err) => {
-  if (err?.name === 'ZodError') {
-    return {
-      status: 400,
-      code: 'BAD_REQUEST',
-      message: 'Invalid input',
-      details: err.issues || err.errors || err.message,
-    };
-  }
-  return {
-    status: err?.status || 500,
-    code: err?.code || 'INTERNAL',
-    message: err?.message || 'Internal error',
-    details: err?.details,
-  };
-};
 
 // Utility logger
 const logRequest = (req, route) => {
@@ -51,9 +21,15 @@ const logRequest = (req, route) => {
 router.get('/status', (req, res) => {
   logRequest(req, '/mcp/v1/status');
 
-  sendSuccess(req, res, {
+  // v1 is kept for backwards compatibility. Prefer /mcp/v2 for new clients.
+  res.setHeader('Deprecation', 'true');
+  res.setHeader('Link', '</mcp/v2/status>; rel="successor-version"');
+
+  sendSuccessV1(req, res, {
     status: 'ok',
     version: 'v1.0.0',
+    deprecated: true,
+    successor: { base: '/mcp/v2', status: '/mcp/v2/status', tools: '/mcp/v2/tools' },
     tools_registered: Object.keys(MCP_TOOLS),
     timestamp: new Date().toISOString(),
   });
@@ -68,12 +44,10 @@ router.all(
   logRequest(req, `/mcp/v1/github/${req.params.action}`);
   const tool = MCP_TOOLS['github'];
   if (!tool) {
-    return sendError(
+    return sendErrorV1(
       req,
       res,
-      404,
-      'NOT_FOUND',
-      "Tool 'github' not found."
+      new ApiError({ status: 404, code: 'NOT_FOUND', message: "Tool 'github' not found." })
     );
   }
   try {
@@ -86,11 +60,10 @@ router.all(
     };
     const validatedInput = tool.input_schema.parse(input);
     const data = await tool.handler(validatedInput);
-    sendSuccess(req, res, data);
+    sendSuccessV1(req, res, data);
   } catch (error) {
     console.error(`Error in github_adapter (${req.params.action}):`, error);
-    const { status, code, message, details } = mapError(error);
-    sendError(req, res, status, code, message, details);
+    return sendErrorV1(req, res, error);
   }
 });
 
@@ -103,12 +76,10 @@ router.all(
   logRequest(req, `/mcp/v1/github`);
   const tool = MCP_TOOLS['github'];
   if (!tool) {
-    return sendError(
+    return sendErrorV1(
       req,
       res,
-      404,
-      'NOT_FOUND',
-      "Tool 'github' not found."
+      new ApiError({ status: 404, code: 'NOT_FOUND', message: "Tool 'github' not found." })
     );
   }
   try {
@@ -121,11 +92,10 @@ router.all(
     };
     const validatedInput = tool.input_schema.parse(input);
     const data = await tool.handler(validatedInput);
-    sendSuccess(req, res, data);
+    sendSuccessV1(req, res, data);
   } catch (error) {
     console.error(`Error in github_adapter (default):`, error);
-    const { status, code, message, details } = mapError(error);
-    sendError(req, res, status, code, message, details);
+    return sendErrorV1(req, res, error);
   }
 });
 
@@ -149,12 +119,10 @@ router.all(
   }
 
   if (!tool) {
-    return sendError(
+    return sendErrorV1(
       req,
       res,
-      404,
-      'NOT_FOUND',
-      `Tool '${tool_name}' not found.`
+      new ApiError({ status: 404, code: 'NOT_FOUND', message: `Tool '${tool_name}' not found.` })
     );
   }
 
@@ -168,11 +136,10 @@ router.all(
     };
     const validatedInput = tool.input_schema.parse(input);
     const data = await tool.handler(validatedInput);
-    sendSuccess(req, res, data);
+    sendSuccessV1(req, res, data);
   } catch (error) {
     console.error(`Error in ${tool_name}:`, error);
-    const { status, code, message, details } = mapError(error);
-    sendError(req, res, status, code, message, details);
+    return sendErrorV1(req, res, error);
   }
 });
 

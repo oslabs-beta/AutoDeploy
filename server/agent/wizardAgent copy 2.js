@@ -4,12 +4,6 @@ import fetch from 'node-fetch';
 
 dotenv.config();
 
-const MCP_BASE_URL =
-  (process.env.MCP_BASE_URL || 'http://localhost:3000/mcp/v1').replace(
-    /\/$/,
-    ''
-  );
-
 // Added by Lorenc
 // Lazily create the OpenAI client so the server can boot even if OPENAI_API_KEY is missing.
 // We only require the key when the wizard agent actually needs to call OpenAI.
@@ -75,7 +69,7 @@ User request:
 // Helper: call MCP routes dynamically, with error handling
 async function callMCPTool(tool, input, cookie) {
   try {
-    const response = await fetch(`${MCP_BASE_URL}/${tool}`, {
+    const response = await fetch(`http://localhost:3000/mcp/v1/${tool}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -90,11 +84,7 @@ async function callMCPTool(tool, input, cookie) {
     return await response.json();
   } catch (err) {
     console.warn('⚠️ MCP call failed:', err.message || err);
-    return {
-      success: false,
-      error: 'MCP server unreachable',
-      details: err?.message,
-    };
+    return { error: 'MCP server unreachable' };
   }
 }
 
@@ -223,8 +213,7 @@ Tell me what you’d like to do next.
     pipeline_commit:
       /\b(yes commit|commit (the )?(pipeline|workflow|file)|apply (the )?(pipeline|workflow)|save (the )?(pipeline|workflow)|push (the )?(pipeline|workflow))\b/i,
     oidc_adapter: /\b(role|jenkins)\b/i,
-    github_adapter:
-      /\b(github|repo info|repositories?|repos?\b|repo\b|[\w-]+\/[\w-]+)\b/i,
+    github_adapter: /\b(github|repo info|repository|[\w-]+\/[\w-]+)\b/i,
   };
 
   // Short-circuit if agent_decision is "capabilities"
@@ -253,6 +242,7 @@ Tell me what you’d like to do next.
         labeledRepo?.[1] ||
         genericRepo?.[1] ||
         pipelineSnapshot?.repo ||
+        globalThis.LAST_REPO_USED ||
         null;
 
       const labeledProvider =
@@ -407,6 +397,12 @@ Tell me what you’d like to do next.
           );
           payload.template = 'node_app';
         }
+        // --- Preserve repo context globally ---
+        if (!payload.repo && globalThis.LAST_REPO_USED) {
+          payload.repo = globalThis.LAST_REPO_USED;
+        } else if (payload.repo) {
+          globalThis.LAST_REPO_USED = payload.repo;
+        }
         // --- Add options and stages from pipelineSnapshot only ---
         if (pipelineSnapshot?.options) {
           payload.options = pipelineSnapshot.options;
@@ -423,8 +419,9 @@ Tell me what you’d like to do next.
         // Extract YAML for confirmation step (NO AI YAML merging, only backend-generated)
         const generatedYaml =
           output?.data?.data?.generated_yaml ||
-          output?.data?.generated_yaml ||
           null;
+        // Store YAML globally for future commit step
+        globalThis.LAST_GENERATED_YAML = generatedYaml;
         // Return confirmation-required structure
         return {
           success: true,
@@ -452,7 +449,7 @@ Tell me what you’d like to do next.
           );
           agentMeta.tool_called = 'github_adapter';
 
-          const repoForCommits = repo || pipelineSnapshot?.repo || null;
+          const repoForCommits = repo || globalThis.LAST_REPO_USED;
           if (!repoForCommits) {
             return {
               success: false,
@@ -476,7 +473,7 @@ Tell me what you’d like to do next.
         }
 
         // Ensure we have a repo
-        const commitRepo = repo || pipelineSnapshot?.repo || null;
+        const commitRepo = repo || globalThis.LAST_REPO_USED;
         if (!commitRepo) {
           return {
             success: false,
@@ -489,11 +486,7 @@ Tell me what you’d like to do next.
         const yamlMatch = userPromptText.match(/```yaml([\s\S]*?)```/i);
         const yamlFromPrompt = yamlMatch ? yamlMatch[1].trim() : null;
 
-        const yaml =
-          yamlFromPrompt ||
-          pipelineSnapshot?.generated_yaml ||
-          pipelineSnapshot?.yaml ||
-          null;
+        const yaml = yamlFromPrompt || globalThis.LAST_GENERATED_YAML || null;
 
         if (!yaml) {
           return {
@@ -502,6 +495,9 @@ Tell me what you’d like to do next.
               'I don’t have a pipeline YAML to commit. Please generate one first.',
           };
         }
+
+        // Save YAML globally for future edits
+        globalThis.LAST_GENERATED_YAML = yaml;
 
         const commitPayload = {
           repoFullName: commitRepo,

@@ -12,6 +12,7 @@ import meRouter from './routes/me.js';
 import authAws from './routes/auth.aws.js';
 import authGoogle from './routes/auth.google.js';
 import mcpRouter from './routes/mcp.js';
+import mcpV2Router from './routes/mcp.v2.js';
 import agentRouter from './routes/agent.js';
 import githubAuthRouter from './routes/auth.github.js';
 import deploymentsRouter from './routes/deployments.js';
@@ -23,6 +24,7 @@ import pipelineCommitRouter from './routes/pipelineCommit.js';
 import pipelineSessionsRouter from './routes/pipelineSessions.js';
 import scaffoldCommitRouter from './routes/scaffoldCommit.js';
 import workflowCommitRouter from './routes/workflowCommit.js';
+import ragRouter from './routes/rag.js';
 // app.use(authRoutes);
 import jenkinsRouter from './routes/jenkins.js';
 
@@ -77,6 +79,7 @@ app.get('/db/ping', async (_req, res) => {
 // Routes
 app.use("/api", meRouter);
 app.use("/api", systemBannerRouter);
+app.use('/api/rag', ragRouter);
 // Admin-ish user management routes (all of these are now authz-protected
 // inside usersRoutes.js using MANAGE_USERS capability).
 
@@ -99,6 +102,7 @@ app.use('/mcp/v1', pipelineCommitRouter);
 app.use('/mcp/v1', mcpRouter);
 app.use('/mcp/v1', scaffoldCommitRouter);
 app.use('/mcp/v1', workflowCommitRouter);
+app.use('/mcp/v2', mcpV2Router);
 app.use('/auth/local', localAuthRouter);
 app.use('/auth/github', githubAuthRouter);
 app.use(authRouter);
