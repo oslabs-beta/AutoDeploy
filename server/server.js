@@ -18,6 +18,7 @@ import deploymentsRouter from './routes/deployments.js';
 import authRouter from './routes/authRoutes.js';
 import localAuthRouter from "./routes/auth.local.js";
 import userRouter from './routes/usersRoutes.js';
+import systemBannerRouter from './routes/systemBanner.js';
 import pipelineCommitRouter from './routes/pipelineCommit.js';
 import pipelineSessionsRouter from './routes/pipelineSessions.js';
 import scaffoldCommitRouter from './routes/scaffoldCommit.js';
@@ -63,6 +64,7 @@ app.get('/db/ping', async (_req, res) => {
 
 // Routes
 app.use("/api", meRouter);
+app.use("/api", systemBannerRouter);
 // Admin-ish user management routes (all of these are now authz-protected
 // inside usersRoutes.js using MANAGE_USERS capability).
 app.use('/', userRouter);

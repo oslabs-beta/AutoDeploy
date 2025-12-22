@@ -5,6 +5,7 @@ export const Actions = {
   USE_AGENT: 'USE_AGENT',
   USE_MCP_TOOL: 'USE_MCP_TOOL',
   MANAGE_USERS: 'MANAGE_USERS',
+  MANAGE_BANNERS: 'MANAGE_BANNERS',
   // Future examples:
   // DEPLOY_PROJECT: 'DEPLOY_PROJECT',
 };
