@@ -152,3 +152,10 @@ jenkins.pem
 
 # Local change log (Chinese summary)
 change_log_cn.md
+
+WARP.md
+BACKEND_FLOWS.md
+FRONTEND_COLORS.md
+FRONTEND_FLOWS.md
+AUTH.md
+*.pptx

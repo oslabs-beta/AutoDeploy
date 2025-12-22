@@ -6,6 +6,11 @@ import { query } from "../db.js";
 
 const router = Router();
 
+// During beta, automatically grant `beta_pro_granted` to new signups when
+// this flag is true. This lets you easily turn off future auto-pro without
+// touching existing beta users.
+const AUTO_BETA_PRO = process.env.BETA_AUTO_BETA_PRO === "true";
+
 function scryptHash(password, saltBase64) {
   const salt = saltBase64
     ? Buffer.from(saltBase64, "base64")
@@ -57,9 +62,13 @@ router.post("/signup", async (req, res) => {
     return res.status(409).json({ error: "Account already exists" });
   }
 
+  const betaProGranted = AUTO_BETA_PRO ? true : false;
+
   const { rows: userRows } = await query(
-    `insert into users (email) values ($1) returning id, email, github_username;`,
-    [email]
+    `insert into users (email, beta_pro_granted)
+     values ($1, $2)
+     returning id, email, github_username, beta_pro_granted;`,
+    [email, betaProGranted]
   );
 
   const user = userRows[0];

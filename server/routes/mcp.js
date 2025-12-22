@@ -1,6 +1,7 @@
 import express from 'express';
 import { MCP_TOOLS } from '../tools/index.js';
 import { requireSession } from '../lib/requireSession.js';
+import { Actions, requireCapability } from '../lib/authorization.js';
 
 const router = express.Router();
 
@@ -26,7 +27,11 @@ router.get('/status', (req, res) => {
 });
 
 // --- GitHub adapter subcommands (explicit) ---
-router.all('/github/:action', requireSession, async (req, res) => {
+router.all(
+  '/github/:action',
+  requireSession,
+  requireCapability(Actions.USE_MCP_TOOL),
+  async (req, res) => {
   logRequest(req, `/mcp/v1/github/${req.params.action}`);
   const tool = MCP_TOOLS['github'];
   if (!tool) {
@@ -52,7 +57,11 @@ router.all('/github/:action', requireSession, async (req, res) => {
 });
 
 // Optional fallback: /mcp/v1/github -> default action 'repos'
-router.all('/github', requireSession, async (req, res) => {
+router.all(
+  '/github',
+  requireSession,
+  requireCapability(Actions.USE_MCP_TOOL),
+  async (req, res) => {
   logRequest(req, `/mcp/v1/github`);
   const tool = MCP_TOOLS['github'];
   if (!tool) {
@@ -78,7 +87,11 @@ router.all('/github', requireSession, async (req, res) => {
 });
 
 // Dynamic route: handles any tool in registry
-router.all('/:tool_name', requireSession, async (req, res) => {
+router.all(
+  '/:tool_name',
+  requireSession,
+  requireCapability(Actions.USE_MCP_TOOL),
+  async (req, res) => {
   const { tool_name } = req.params;
   const tool = MCP_TOOLS[tool_name];
   logRequest(req, `/mcp/v1/${tool_name}`);

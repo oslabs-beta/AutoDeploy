@@ -10,11 +10,16 @@ import { pipeline_generator } from '../tools/pipeline_generator.js';
 import { repo_reader } from '../tools/repo_reader.js';
 import { oidc_adapter } from '../tools/oidc_adapter.js';
 import { requireSession } from '../lib/requireSession.js';
+import { Actions, requireCapability } from '../lib/authorization.js';
 
 const router = express.Router();
 
 // Trigger full pipeline wizard (MVP agent)
-router.post('/wizard', requireSession, async (req, res) => {
+router.post(
+  '/wizard',
+  requireSession,
+  requireCapability(Actions.USE_AGENT),
+  async (req, res) => {
   try {
     const { repoUrl, provider, branch } = req.body;
     if (!repoUrl || !provider || !branch) {
@@ -37,7 +42,11 @@ router.post('/wizard', requireSession, async (req, res) => {
 });
 
 // Trigger wizard agent with AI prompt
-router.post('/wizard/ai', requireSession, async (req, res) => {
+router.post(
+  '/wizard/ai',
+  requireSession,
+  requireCapability(Actions.USE_AGENT),
+  async (req, res) => {
   try {
     const {
       prompt,

@@ -63,6 +63,8 @@ app.get('/db/ping', async (_req, res) => {
 
 // Routes
 app.use("/api", meRouter);
+// Admin-ish user management routes (all of these are now authz-protected
+// inside usersRoutes.js using MANAGE_USERS capability).
 app.use('/', userRouter);
 app.use('/deployments', deploymentsRouter);
 app.use('/agent', agentRouter);
@@ -79,56 +81,9 @@ app.use('/auth/google', authGoogle);
 app.use('/jenkins', jenkinsRouter);
 app.use('/pipeline-sessions', pipelineSessionsRouter);
 
-/** Users */
-const UserBody = z.object({
-  email: z.string().email(),
-  github_username: z.string().min(1).optional(),
-});
-
-// Create or upsert user by email
-app.post('/users', async (req, res) => {
-  const parse = UserBody.safeParse(req.body);
-  if (!parse.success)
-    return res.status(400).json({ error: parse.error.message });
-  const { email, github_username } = parse.data;
-
-  // upsert on email; requires a unique index on users.email
-  try {
-    const rows = await query(
-      `
-      insert into users (email, github_username)
-      values ($1, $2)
-      on conflict (email) do update set github_username = excluded.github_username
-      returning *;
-      `,
-      [email, github_username ?? null]
-    );
-    res.status(201).json({ user: rows[0] });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.get('/users', async (_req, res) => {
-  try {
-    const rows = await query(`
-      select 
-        u.id as user_id,
-        u.email,
-        u.github_username,
-        c.provider,
-        c.access_token,
-        c.created_at
-      from users u  
-      left join connections c on u.id = c.user_id
-      order by c.created_at desc
-      limit 100;
-    `);
-    res.json({ users: rows });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
+// Legacy inline /users endpoints have been superseded by routes/usersRoutes.js,
+// which now includes authz and a small admin API for promoting users. Keeping
+// everything user-related in that router keeps server.js lighter.
 
 app.get('/connections', async (_req, res) => {
   try {
