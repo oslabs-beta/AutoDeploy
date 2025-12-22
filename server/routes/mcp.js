@@ -5,6 +5,39 @@ import { Actions, requireCapability } from '../lib/authorization.js';
 
 const router = express.Router();
 
+// --- Response helpers ---
+const sendSuccess = (req, res, data, status = 200) =>
+  res.status(status).json({ success: true, data, request_id: req.requestId });
+
+const sendError = (
+  req,
+  res,
+  status = 500,
+  code = 'INTERNAL',
+  message = 'Internal error',
+  details = undefined
+) =>
+  res
+    .status(status)
+    .json({ success: false, error: { code, message, details }, request_id: req.requestId });
+
+const mapError = (err) => {
+  if (err?.name === 'ZodError') {
+    return {
+      status: 400,
+      code: 'BAD_REQUEST',
+      message: 'Invalid input',
+      details: err.issues || err.errors || err.message,
+    };
+  }
+  return {
+    status: err?.status || 500,
+    code: err?.code || 'INTERNAL',
+    message: err?.message || 'Internal error',
+    details: err?.details,
+  };
+};
+
 // Utility logger
 const logRequest = (req, route) => {
   console.log(
@@ -18,7 +51,7 @@ const logRequest = (req, route) => {
 router.get('/status', (req, res) => {
   logRequest(req, '/mcp/v1/status');
 
-  res.json({
+  sendSuccess(req, res, {
     status: 'ok',
     version: 'v1.0.0',
     tools_registered: Object.keys(MCP_TOOLS),
@@ -35,9 +68,13 @@ router.all(
   logRequest(req, `/mcp/v1/github/${req.params.action}`);
   const tool = MCP_TOOLS['github'];
   if (!tool) {
-    return res
-      .status(404)
-      .json({ success: false, error: "Tool 'github' not found." });
+    return sendError(
+      req,
+      res,
+      404,
+      'NOT_FOUND',
+      "Tool 'github' not found."
+    );
   }
   try {
     const input = {
@@ -49,10 +86,11 @@ router.all(
     };
     const validatedInput = tool.input_schema.parse(input);
     const data = await tool.handler(validatedInput);
-    res.json({ success: true, data });
+    sendSuccess(req, res, data);
   } catch (error) {
     console.error(`Error in github_adapter (${req.params.action}):`, error);
-    res.status(500).json({ success: false, error: error.message });
+    const { status, code, message, details } = mapError(error);
+    sendError(req, res, status, code, message, details);
   }
 });
 
@@ -65,9 +103,13 @@ router.all(
   logRequest(req, `/mcp/v1/github`);
   const tool = MCP_TOOLS['github'];
   if (!tool) {
-    return res
-      .status(404)
-      .json({ success: false, error: "Tool 'github' not found." });
+    return sendError(
+      req,
+      res,
+      404,
+      'NOT_FOUND',
+      "Tool 'github' not found."
+    );
   }
   try {
     const input = {
@@ -79,10 +121,11 @@ router.all(
     };
     const validatedInput = tool.input_schema.parse(input);
     const data = await tool.handler(validatedInput);
-    res.json({ success: true, data });
+    sendSuccess(req, res, data);
   } catch (error) {
     console.error(`Error in github_adapter (default):`, error);
-    res.status(500).json({ success: false, error: error.message });
+    const { status, code, message, details } = mapError(error);
+    sendError(req, res, status, code, message, details);
   }
 });
 
@@ -106,9 +149,13 @@ router.all(
   }
 
   if (!tool) {
-    return res
-      .status(404)
-      .json({ success: false, error: `Tool '${tool_name}' not found.` });
+    return sendError(
+      req,
+      res,
+      404,
+      'NOT_FOUND',
+      `Tool '${tool_name}' not found.`
+    );
   }
 
   try {
@@ -121,10 +168,11 @@ router.all(
     };
     const validatedInput = tool.input_schema.parse(input);
     const data = await tool.handler(validatedInput);
-    res.json({ success: true, data });
+    sendSuccess(req, res, data);
   } catch (error) {
     console.error(`Error in ${tool_name}:`, error);
-    res.status(500).json({ success: false, error: error.message });
+    const { status, code, message, details } = mapError(error);
+    sendError(req, res, status, code, message, details);
   }
 });
 

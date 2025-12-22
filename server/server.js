@@ -37,6 +37,18 @@ app.use(helmet());
 app.use(morgan('dev'));
 app.use(cookieParser());
 
+// --- Request ID Middleware ---
+// Generates a lightweight request ID for traceability and surfaces it to clients.
+app.use((req, res, next) => {
+  req.requestId =
+    req.headers['x-request-id'] ||
+    `req_${Date.now().toString(36)}${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
+  res.setHeader('x-request-id', req.requestId);
+  next();
+});
+
 // --- Request Logging Middleware ---
 app.use((req, _res, next) => {
   const user = req.headers['x-user-id'] || 'anonymous';
@@ -67,6 +79,19 @@ app.use("/api", meRouter);
 app.use("/api", systemBannerRouter);
 // Admin-ish user management routes (all of these are now authz-protected
 // inside usersRoutes.js using MANAGE_USERS capability).
+
+// --- Request ID Middleware ---
+// Generates a lightweight request ID for traceability and surfaces it to clients.
+app.use((req, res, next) => {
+  req.requestId =
+    req.headers['x-request-id'] ||
+    `req_${Date.now().toString(36)}${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
+  res.setHeader('x-request-id', req.requestId);
+  next();
+});
+
 app.use('/', userRouter);
 app.use('/deployments', deploymentsRouter);
 app.use('/agent', agentRouter);
