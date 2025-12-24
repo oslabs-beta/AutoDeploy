@@ -1,52 +1,151 @@
 import { z } from 'zod';
 import fs from 'fs/promises';
+import os from 'os';
 import path from 'path';
+import extract from 'extract-zip';
+import fg from 'fast-glob';
+
 import { ApiError } from '../lib/httpEnvelope.js';
+import { embedBatch } from '../lib/rag/embeddingService.js';
+import {
+  upsertVectors,
+  queryVectors,
+  buildNamespace,
+} from '../lib/rag/pineconeClient.js';
+import { answerWithContext } from '../lib/rag/openaiRag.js';
+import {
+  logInteraction,
+  getHistoryByNamespace,
+} from '../lib/rag/supabaseRag.js';
+import {
+  parseGitHubRepoUrl,
+  cloneGithubRepoShallow,
+} from '../lib/rag/githubService.js';
 
-const ASKMYREPO_BASE = (process.env.ASKMYREPO_URL || 'http://localhost:3001').replace(/\/+$/, '');
+// --- Shared helpers (mirrors routes/rag.js) ---
+const CHUNK = 1800;
+const OVERLAP = 200;
 
-async function parseJsonResponse(res, context) {
-  const text = await res.text().catch(() => '');
-  let data = null;
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    // fall through – non-JSON error body
+function chunkText(s) {
+  const out = [];
+  for (let i = 0; i < s.length; i += CHUNK - OVERLAP) {
+    out.push(s.slice(i, i + CHUNK));
+  }
+  return out;
+}
+
+const CODE_EXT = /\.(js|ts|tsx|jsx|json|md|yml|yaml|sql|sh|html|css|scss|xml)$/i;
+const IGNORE = ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/build/**'];
+
+// lockfiles and other noisy artifacts we generally do not want to treat as context
+const SKIP_PATH_PATTERNS = [
+  /(^|\/)package-lock\.json$/i,
+  /(^|\/)yarn\.lock$/i,
+  /(^|\/)pnpm-lock\.ya?ml$/i,
+  /(^|\/)bun\.lockb$/i,
+];
+
+function shouldSkipFile(relPath) {
+  return SKIP_PATH_PATTERNS.some((re) => re.test(relPath));
+}
+
+async function ingestWorkspaceCodeToNamespace({ workspace, namespace, repoSlug, userId }) {
+  // 1) Discover files
+  const files = await fg(['**/*.*'], {
+    cwd: workspace,
+    onlyFiles: true,
+    ignore: IGNORE,
+  });
+
+  const codeFiles = files.filter((p) => CODE_EXT.test(p) && !shouldSkipFile(p));
+
+  // 2) Read + chunk
+  const chunks = [];
+  for (const rel of codeFiles) {
+    const full = path.join(workspace, rel);
+    let text = '';
+    try {
+      text = await fs.readFile(full, 'utf8');
+    } catch {
+      // ignore unreadable files
+    }
+    if (!text) continue;
+    const parts = chunkText(text);
+    parts.forEach((t, idx) => chunks.push({ path: rel, idx, text: t }));
   }
 
-  if (!res.ok) {
-    const message =
-      data?.error || data?.message || `${context} failed: ${res.status} ${res.statusText}`;
+  // 3) Embed + upsert in small batches
+  let upserted = 0;
+  const BATCH = 64;
+  for (let i = 0; i < chunks.length; i += BATCH) {
+    const slice = chunks.slice(i, i + BATCH);
+    const vectors = await embedBatch(slice.map((c) => c.text));
+    const payload = vectors.map((values, k) => ({
+      id: `${namespace}:${i + k}`,
+      values,
+      metadata: {
+        path: slice[k].path,
+        idx: slice[k].idx,
+        text: slice[k].text,
+        repo: repoSlug,
+        user_id: String(userId),
+      },
+    }));
+    await upsertVectors(namespace, payload);
+    upserted += payload.length;
+  }
 
+  return { fileCount: codeFiles.length, chunkCount: chunks.length, upserted };
+}
+
+function ensureNamespaceOwnedByUser(namespace, userId) {
+  const ns = String(namespace || '').trim();
+  const uid = String(userId || '').trim();
+  if (!ns || !uid) {
     throw new ApiError({
-      status: res.status || 500,
-      code: 'ASKMYREPO_HTTP_ERROR',
-      message,
-      details: data || text || null,
+      status: 400,
+      code: 'BAD_REQUEST',
+      message: 'Missing namespace or user_id',
     });
   }
 
-  return data;
+  if (!ns.startsWith(`${uid}:`)) {
+    throw new ApiError({
+      status: 403,
+      code: 'FORBIDDEN_NAMESPACE',
+      message: 'Namespace does not belong to this user',
+      details: { namespace: ns },
+    });
+  }
 }
 
-// --- rag_ingest_zip ---
-// Note: this runs inside AutoDeploy's Node process. `file_path` MUST be readable
-// from this server's filesystem. The tool will POST it to AskMyRepo as repoZip.
+// --- rag_ingest_zip (local) ---
+// Ingest a zip on the AutoDeploy server into Pinecone under a user+repo namespace.
 export const rag_ingest_zip = {
   name: 'rag_ingest_zip',
   description:
-    'Upload a zipped repository from the AutoDeploy server filesystem and ingest it into AskMyRepo (/api/v2/ingest/zip). Returns a namespace and stats.',
+    'Upload a zipped repository from the AutoDeploy server filesystem and ingest it into the local RAG backend. Returns a namespace and stats.',
 
   input_schema: z.object({
-    file_path: z.string().describe(
-      'Absolute or working-directory-relative path to a .zip file on the AutoDeploy server. The file will be streamed to AskMyRepo as multipart form-data field `repoZip`.'
-    ),
+    user_id: z
+      .string()
+      .describe('Current AutoDeploy user id (injected by MCP v2).'),
+    file_path: z
+      .string()
+      .describe('Absolute or working-directory-relative path to a .zip file on the AutoDeploy server.'),
+    repoSlug: z
+      .string()
+      .describe('Optional owner/repo slug used for namespacing; defaults to the zip basename.')
+      .optional(),
   }),
 
-  handler: async ({ file_path }) => {
-    let buf;
+  handler: async ({ user_id, file_path, repoSlug }) => {
+    // Basic sanity check on the zip
     try {
-      buf = await fs.readFile(file_path);
+      const stat = await fs.stat(file_path);
+      if (!stat.isFile()) {
+        throw new Error('Not a file');
+      }
     } catch (err) {
       throw new ApiError({
         status: 400,
@@ -56,82 +155,145 @@ export const rag_ingest_zip = {
       });
     }
 
-    const blob = new Blob([buf], { type: 'application/zip' });
-    const form = new FormData();
-    form.append('repoZip', blob, path.basename(file_path));
+    const inferredSlug =
+      repoSlug ||
+      path
+        .basename(file_path)
+        .replace(/\.zip$/i, '')
+        .trim() || 'local-repo';
 
-    const res = await fetch(`${ASKMYREPO_BASE}/api/v2/ingest/zip`, {
-      method: 'POST',
-      body: form,
-    });
+    const namespace = buildNamespace({ userId: user_id, repoSlug: inferredSlug });
 
-    const data = await parseJsonResponse(res, 'AskMyRepo zip ingest');
+    const workspace = path.join(
+      os.tmpdir(),
+      `rag_zip_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    );
 
-    // Expected shape: { message, namespace, jobId, fileCount, chunkCount, upserted }
-    return data;
+    try {
+      await fs.mkdir(workspace, { recursive: true });
+      await extract(file_path, { dir: workspace });
+
+      const { fileCount, chunkCount, upserted } = await ingestWorkspaceCodeToNamespace({
+        workspace,
+        namespace,
+        repoSlug: inferredSlug,
+        userId: user_id,
+      });
+
+      return {
+        message: 'Embedded & upserted',
+        namespace,
+        jobId: namespace,
+        fileCount,
+        chunkCount,
+        upserted,
+      };
+    } finally {
+      try {
+        await fs.rm(workspace, { recursive: true, force: true });
+      } catch {
+        // ignore
+      }
+    }
   },
 };
 
-// --- rag_ingest_github ---
+// --- rag_ingest_github (local) ---
 export const rag_ingest_github = {
   name: 'rag_ingest_github',
   description:
-    'Ingest a GitHub repository (and optionally its Issues) into AskMyRepo RAG backend via /api/v2/ingest/github. Returns namespace and ingestion stats.',
+    'Ingest a GitHub repository into the local RAG backend (Pinecone + Supabase) using the current AutoDeploy user as the namespace owner.',
 
   input_schema: z.object({
-    repoUrl: z.string().describe('GitHub repository URL, e.g. https://github.com/OWNER/REPO.'),
-    namespace: z
+    user_id: z
       .string()
-      .describe('Optional explicit Pinecone namespace. If omitted, AskMyRepo derives one from the repo name.')
-      .optional(),
+      .describe('Current AutoDeploy user id (injected by MCP v2).'),
+    repoUrl: z
+      .string()
+      .describe('GitHub repository URL, e.g. https://github.com/OWNER/REPO.'),
     includeIssues: z
       .boolean()
-      .describe('Whether to ingest GitHub Issues (and a limited number of comments). Defaults to true.')
+      .describe('Whether to ingest GitHub Issues. Currently ignored; code-only ingestion.')
       .optional()
-      .default(true),
+      .default(false),
     githubToken: z
       .string()
       .describe(
-        'Optional GitHub PAT for authenticated API calls. If provided, it is sent as Authorization: Bearer <token> to AskMyRepo.'
+        'Optional GitHub PAT for authenticated GitHub API calls. Currently not used for git clone, which expects a public repo or pre-configured git auth.'
       )
       .optional(),
   }),
 
-  handler: async ({ repoUrl, namespace, includeIssues = true, githubToken }) => {
-    const headers = {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    };
-    if (githubToken) headers['Authorization'] = `Bearer ${githubToken}`;
+  handler: async ({ user_id, repoUrl, includeIssues = false }) => {
+    const parsed = parseGitHubRepoUrl(repoUrl);
+    if (!parsed) {
+      throw new ApiError({
+        status: 400,
+        code: 'BAD_REPO_URL',
+        message: 'Invalid GitHub repoUrl',
+        details: { repoUrl },
+      });
+    }
 
-    const body = {
-      repoUrl,
-      namespace: namespace || undefined,
-      includeIssues,
-    };
+    const repoSlug = `${parsed.owner}/${parsed.repo}`;
+    const namespace = buildNamespace({ userId: user_id, repoSlug });
 
-    const res = await fetch(`${ASKMYREPO_BASE}/api/v2/ingest/github`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
+    const workspace = path.join(
+      os.tmpdir(),
+      `rag_github_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    );
 
-    const data = await parseJsonResponse(res, 'AskMyRepo GitHub ingest');
+    try {
+      await fs.mkdir(workspace, { recursive: true });
+      const repoDir = path.join(workspace, 'repo');
+      await cloneGithubRepoShallow({ repoUrl, dest: repoDir });
 
-    // Expected shape: { namespace, repo: { owner, repo }, includeIssues, fileCount, chunkCount, upserted, issueCount, issueChunkCount, issueUpserted }
-    return data;
+      const { fileCount, chunkCount, upserted } = await ingestWorkspaceCodeToNamespace({
+        workspace: repoDir,
+        namespace,
+        repoSlug,
+        userId: user_id,
+      });
+
+      // NOTE: includeIssues is accepted but currently ignored. We can extend this
+      // to call fetchRepoIssues(...) and upsert those chunks as kind: 'issue'.
+      return {
+        namespace,
+        repo: { owner: parsed.owner, repo: parsed.repo },
+        includeIssues,
+        fileCount,
+        chunkCount,
+        upserted,
+        issueCount: 0,
+        issueChunkCount: 0,
+        issueUpserted: 0,
+      };
+    } finally {
+      try {
+        await fs.rm(workspace, { recursive: true, force: true });
+      } catch {
+        // ignore
+      }
+    }
   },
 };
 
-// --- rag_query_namespace ---
+// --- rag_query_namespace (local) ---
 export const rag_query_namespace = {
   name: 'rag_query_namespace',
   description:
-    'Run a RAG query against a namespace (files + issues) via AskMyRepo /api/v2/query and return answer plus structured sources.',
+    'Run a RAG query against a namespace (files + optional issues) in the local Pinecone index and return answer plus structured sources.',
 
   input_schema: z.object({
-    namespace: z.string().describe('Namespace returned from rag_ingest_zip or rag_ingest_github.'),
-    question: z.string().describe('User question to ask about the repository.'),
+    user_id: z
+      .string()
+      .describe('Current AutoDeploy user id (injected by MCP v2).'),
+    namespace: z
+      .string()
+      .describe('Namespace returned from rag_ingest_zip or rag_ingest_github.'),
+    question: z
+      .string()
+      .describe('User question to ask about the repository.'),
     topK: z
       .number()
       .int()
@@ -141,39 +303,49 @@ export const rag_query_namespace = {
       .optional(),
   }),
 
-  handler: async ({ namespace, question, topK }) => {
-    const headers = {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    };
+  handler: async ({ user_id, namespace, question, topK }) => {
+    ensureNamespaceOwnedByUser(namespace, user_id);
 
-    const body = {
-      namespace,
-      question,
-      ...(topK ? { topK } : {}),
-    };
+    const [qVec] = await embedBatch([question]);
+    const matches = await queryVectors(namespace, qVec, Number(topK) || 5);
 
-    const res = await fetch(`${ASKMYREPO_BASE}/api/v2/query`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
+    const context = matches
+      .map((m) => {
+        const meta = m.metadata || {};
+        const header = `File: ${meta.path} (chunk ${meta.idx}) [score ${
+          m.score?.toFixed?.(3) ?? m.score
+        }]`;
+        return `${header}\n${meta.text || ''}`;
+      })
+      .join('\n\n---\n\n');
 
-    const data = await parseJsonResponse(res, 'AskMyRepo RAG query');
+    const answer = await answerWithContext(question, context);
 
-    // Expected shape: { answer, sources: [...] }
-    return data;
+    await logInteraction({ namespace, jobId: namespace, question, answer });
+
+    const sources = matches.map((m) => ({
+      path: m.metadata?.path,
+      idx: m.metadata?.idx,
+      score: m.score,
+    }));
+
+    return { answer, sources };
   },
 };
 
-// --- rag_get_logs ---
+// --- rag_get_logs (local) ---
 export const rag_get_logs = {
   name: 'rag_get_logs',
   description:
-    'Fetch recent logged interactions for a namespace from AskMyRepo via /api/v2/logs. Returns rows from Supabase (query_history/logs).',
+    'Fetch recent logged interactions for a namespace from the local Supabase-backed query history.',
 
   input_schema: z.object({
-    namespace: z.string().describe('Namespace whose interaction history should be fetched.'),
+    user_id: z
+      .string()
+      .describe('Current AutoDeploy user id (injected by MCP v2).'),
+    namespace: z
+      .string()
+      .describe('Namespace whose interaction history should be fetched.'),
     limit: z
       .number()
       .int()
@@ -182,19 +354,14 @@ export const rag_get_logs = {
       .optional(),
   }),
 
-  handler: async ({ namespace, limit }) => {
-    const qs = new URLSearchParams({ namespace });
-    if (limit) qs.set('limit', String(limit));
+  handler: async ({ user_id, namespace, limit }) => {
+    ensureNamespaceOwnedByUser(namespace, user_id);
 
-    const url = `${ASKMYREPO_BASE}/api/v2/logs?${qs.toString()}`;
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
+    const rows = await getHistoryByNamespace({
+      namespace,
+      limit: limit ? Number(limit) : 50,
     });
 
-    const data = await parseJsonResponse(res, 'AskMyRepo logs');
-
-    // Expected shape: array of Supabase rows.
-    return data;
+    return rows;
   },
 };

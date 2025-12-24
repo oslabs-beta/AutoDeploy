@@ -28,6 +28,7 @@
     "@aws-sdk/client-sts": "^3.921.0",
     "@aws-sdk/credential-provider-sso": "^3.921.0",
     "@openai/agents": "^0.2.1",
+    "@pinecone-database/pinecone": "^6.1.2",
     "@supabase/supabase-js": "^2.81.1",
     "axios": "^1.12.2",
     "chalk": "^5.6.2",
@@ -35,15 +36,19 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
+    "fast-glob": "^3.3.3",
     "googleapis": "^164.1.0",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.2",
     "morgan": "^1.10.1",
     "node-fetch": "^3.3.2",
     "openai": "^6.4.0",
     "ora": "^9.0.0",
     "pg": "^8.16.3",
-    "zod": "^3.25.76"
+    "zod": "^3.25.76",
+    "extract-zip": "^2.0.1",
+    "simple-git": "^3.28.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.10",

@@ -51,6 +51,11 @@ Add first-party RAG support directly to the AutoDeploy backend so we can ingest 
 - **Server wiring**
   - Mounted the new router in `server/server.js` under `/api/rag`.
   - All `/api/rag/*` routes are protected by `requireSession` and rely on the existing JWT cookie (`mcp_session`) / Supabase-backed user resolution.
+  - Added local RAG MCP tools in `server/tools/askmyrepo_rag.js` and registered them in `server/tools/index.js` as:
+    - `rag_ingest_zip`, `rag_ingest_github` – ingest local zip or GitHub repo into Pinecone under a user+repo namespace.
+    - `rag_query_namespace` – run a RAG query against a namespace, returning `{ answer, sources }`.
+    - `rag_get_logs` – fetch recent interaction history for a namespace from Supabase.
+  - Captured the HTTP + MCP contracts in `server/src/RAG_API_Contracts.md` so frontend/agent clients and the marketing site can rely on stable shapes.
 
 # Environment / config
 

@@ -56,6 +56,7 @@ Important route groups include:
 - `/agent/*` – higher‑level "wizard" orchestration endpoints.
 - `/mcp/v1/*` – MCP tool façade (see below).
 - `/pipeline-sessions/*` – multi‑step pipeline wizard backed by Supabase tables.
+- `/api/rag/*` – repository RAG APIs (GitHub + zip ingest, query, logs) backed by Pinecone + Supabase; see `server/src/RAG_API_Contracts.md` for full contracts.
 
 The backend expects a Postgres database (e.g., via a Supabase connection string) configured in `server/db.js`.
 
@@ -70,6 +71,7 @@ Notable tools:
 - `oidc`, `oidc_adapter` → handles AWS OIDC roles and related configuration.
 - `github`, `github_adapter` → GitHub automation (e.g., file upserts, workflow dispatch).
 - `gcp`, `gcp_adapter`, `scaffold`, `scaffold_generator` → GCP‑specific workflow scaffolding.
+- `rag_ingest_zip`, `rag_ingest_github`, `rag_query_namespace`, `rag_get_logs` → local repo RAG tools (Pinecone embeddings + Supabase logs) used by MCP v2 and `/api/rag`.
 
 Each tool defines an `input_schema` (Zod) and a `handler` function. The `mcp` route:
 

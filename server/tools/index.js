@@ -8,7 +8,7 @@ import { github_adapter } from './github_adapter.js';
 import { gcp_adapter } from './gcp_adapter.js';
 import { scaffold_generator } from './scaffold_generator.js'; // Dockerfile generator
 
-// AskMyRepo RAG v2 tools (Pinecone + Supabase via external service)
+// Local RAG tools (Pinecone + Supabase via AutoDeploy backend)
 import {
   rag_ingest_zip,
   rag_ingest_github,
