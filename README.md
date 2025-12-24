@@ -204,6 +204,18 @@ npm test
 
 This runs `node test/smoke.test.js`, which calls `GET /health` on the backend and fails if the response is not `{ ok: true }`.
 
+Additional tests:
+
+```bash
+# Run authorization tests for Workflow Copilot / RAG gating
+node --test test/authorization.test.js
+```
+
+These cover:
+
+- `isPro(user)` behavior for free vs pro vs beta-pro users.
+- `can(user, Actions.USE_AGENT)` (agent + RAG gating) vs `can(user, Actions.USE_MCP_TOOL)` (MCP access for all authenticated users).
+
 ## Project Structure
 
 High‑level layout:

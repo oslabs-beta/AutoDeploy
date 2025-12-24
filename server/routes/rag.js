@@ -7,6 +7,7 @@ import extract from 'extract-zip';
 import fg from 'fast-glob';
 
 import { requireSession } from '../lib/requireSession.js';
+import { Actions, requireCapability } from '../lib/authorization.js';
 import { embedBatch } from '../lib/rag/embeddingService.js';
 import { upsertVectors, queryVectors, buildNamespace } from '../lib/rag/pineconeClient.js';
 import { answerWithContext } from '../lib/rag/openaiRag.js';
@@ -102,7 +103,7 @@ async function ingestWorkspaceCodeToNamespace({ workspace, namespace, repoSlug, 
 // multipart/form-data
 // - repoZip: .zip file (required)
 // - repoSlug: owner/repo string (required)
-router.post('/ingest/zip', requireSession, (req, res, next) => {
+router.post('/ingest/zip', requireSession, requireCapability(Actions.USE_AGENT), (req, res, next) => {
   upload(req, res, async (err) => {
     try {
       if (err) throw err;
@@ -163,7 +164,7 @@ router.post('/ingest/zip', requireSession, (req, res, next) => {
 // --- POST /api/rag/ingest/github ---
 // JSON body: { repoUrl, includeIssues?, githubToken? }
 // - repoUrl is required and must be a valid GitHub repo URL
-router.post('/ingest/github', requireSession, async (req, res, next) => {
+router.post('/ingest/github', requireSession, requireCapability(Actions.USE_AGENT), async (req, res, next) => {
   try {
     const { repoUrl, includeIssues = false, githubToken } = req.body || {};
 
@@ -232,7 +233,7 @@ router.post('/ingest/github', requireSession, async (req, res, next) => {
 
 // --- POST /api/rag/query ---
 // { namespace, question, topK? }
-router.post('/query', requireSession, async (req, res, next) => {
+router.post('/query', requireSession, requireCapability(Actions.USE_AGENT), async (req, res, next) => {
   try {
     const { namespace, question, topK = 5 } = req.body || {};
 
@@ -289,7 +290,7 @@ router.post('/query', requireSession, async (req, res, next) => {
 });
 
 // --- GET /api/rag/logs?namespace=...&limit=... ---
-router.get('/logs', requireSession, async (req, res, next) => {
+router.get('/logs', requireSession, requireCapability(Actions.USE_AGENT), async (req, res, next) => {
   try {
     const { namespace, limit } = req.query || {};
 

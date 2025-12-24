@@ -12,7 +12,7 @@ export const Actions = {
 
 const BETA_TREAT_ALL_AS_PRO = process.env.BETA_TREAT_ALL_AS_PRO === 'true';
 
-function isPro(user) {
+export function isPro(user) {
   // During beta, a single env flag can allow all authenticated users to behave as "pro".
   if (BETA_TREAT_ALL_AS_PRO) return true;
 
