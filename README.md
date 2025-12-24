@@ -77,6 +77,8 @@ Each tool defines an `input_schema` (Zod) and a `handler` function. The `mcp` ro
 - Validates input using the tool’s schema.
 - Normalizes responses to `{ success: true/false, data | error }`.
 
+> **Note:** The autodeploy-landing marketing site and docs now call these MCP v1 endpoints directly for live demos (e.g., `repo_reader` and `pipeline_history`) when pointed at the same backend, so changes to `/mcp/v1/*` should keep the v1 envelopes and contracts stable.
+
 ### Frontend
 
 The frontend lives under `client/` and is a React + TypeScript app built with Vite and Tailwind.
