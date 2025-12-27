@@ -57,6 +57,8 @@ Important route groups include:
 - `/mcp/v1/*` – MCP tool façade (see below).
 - `/pipeline-sessions/*` – multi‑step pipeline wizard backed by Supabase tables.
 - `/api/rag/*` – repository RAG APIs (GitHub + zip ingest, query, logs) backed by Pinecone + Supabase; see `server/src/RAG_API_Contracts.md` for full contracts.
+- `/api/connections` – GitHub connection status endpoint used by the Secrets step to confirm that a GitHub token exists and has write access for the selected repo.
+- `/api/secrets/github/*` – GitHub Actions secrets presence + upsert endpoints used by the Secrets step to check and create `AWS_ROLE_ARN` (repo/env level) without exposing values.
 
 The backend expects a Postgres database (e.g., via a Supabase connection string) configured in `server/db.js`.
 
@@ -88,7 +90,7 @@ The frontend lives under `client/` and is a React + TypeScript app built with Vi
 Key elements:
 
 - Pages and routes in `client/src/pages` and `client/src/routes` implement the connect/login flow, configuration wizard, secrets management, Jenkins page, dashboard, and 404.
-- Zustand stores in `client/src/store` (e.g., `usePipelineStore`, `useWizardStore`, `useDeployStore`, `useAuthStore`) hold wizard selections, auth/session info, pipeline generation results, and deployment data.
+- Zustand stores in `client/src/store` (e.g., `usePipelineStore`, `useWizardStore`, `useDeployStore`, `useAuthStore`, `useConfigStore`) hold wizard selections, auth/session info, pipeline generation results, secrets/preflight state, and deployment data.
 - `client/src/lib/api.ts` wraps REST and MCP calls, handles GitHub OAuth redirects, caches AWS roles and repo lists, and orchestrates pipeline commit and rollback.
 - UI components under `client/src/components` include shared primitives (`ui/`), layout and nav (`common/`), wizard steps (`wizard/`), and dashboard widgets (`dashboard/`).
 

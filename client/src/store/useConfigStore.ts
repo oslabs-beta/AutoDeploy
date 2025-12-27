@@ -17,6 +17,7 @@ type ConfigState = {
   status: "idle" | "loading" | "saving" | "error";
   error?: string;
   preflightResults?: { label: string; ok: boolean; info?: string }[];
+  lastSecretNotice?: string;
 };
 
 type ConfigActions = {
@@ -33,6 +34,7 @@ const initial: ConfigState = {
   secrets: [],
   aws: {},
   status: "idle",
+  lastSecretNotice: undefined,
 };
 
 export const useConfigStore = create<ConfigState & ConfigActions>()((set, get) => ({
@@ -55,10 +57,20 @@ export const useConfigStore = create<ConfigState & ConfigActions>()((set, get) =
     }
   },
   async addOrUpdateSecret(repo, key, value) {
-    set({ status: "saving" });
-    await api.setSecret({ repo, env: get().env, key, value });
+    set({ status: "saving", lastSecretNotice: undefined });
+    const res = await api.setSecret({ repo, env: get().env, key, value });
     const presence = await api.getSecretPresence(repo, get().env);
-    set({ secrets: presence, status: "idle" });
+
+    let notice: string | undefined;
+    if (res.scope === 'environment') {
+      notice = `Saved ${key} as an environment secret for "${get().env}".`;
+    } else if (res.scope === 'repo' && res.envFallback) {
+      notice = `Saved ${key} as a repo-level secret because GitHub environment "${get().env}" does not exist.`;
+    } else if (res.scope === 'repo') {
+      notice = `Saved ${key} as a repo-level secret.`;
+    }
+
+    set({ secrets: presence, status: "idle", lastSecretNotice: notice });
   },
   async runPreflight(repo) {
     const data = await api.runPreflight({

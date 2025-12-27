@@ -106,3 +106,109 @@ Add first-party RAG support directly to the AutoDeploy backend so we can ingest 
 
 These notes are here to keep the backend and marketing/demo surfaces in sync; future changes to `/mcp/v1/*` should either preserve the v1 contracts or ship a coordinated update to the landing SPA.
 
+---
+
+## Workflow Copilot Agent (User vs Pro) + RAG Gating
+
+- Introduced a lightweight "Workflow Copilot" agent on the Configure page that helps users:
+  - Analyze existing GitHub Actions workflows for the connected repo.
+  - Suggest concise CI/CD improvements.
+  - Propose a complete pipeline based on the current wizard settings.
+- Agent behavior is now **mode-aware**:
+  - **User mode** – available to all authenticated users:
+    - Uses MCP tools only (e.g., `github_adapter` and `pipeline_generator`).
+    - For "Analyze workflows" it calls `github_adapter` (`workflows` action) to list existing workflows per repo.
+    - For "Suggest improvements" it surfaces natural-language suggestions directly without forcing a tool call.
+  - **Pro mode** – gated behind `Actions.USE_AGENT`/`isPro(user)` and RAG access:
+    - Adds on-demand RAG via `/api/rag/ingest/github` + `/api/rag/query` to answer deep workflow questions.
+    - Extracts up to three workflow suggestions from the RAG answer and surfaces them in the UI.
+- RAG HTTP endpoints are now Pro-only:
+  - `/api/rag/ingest/zip`, `/api/rag/ingest/github`, `/api/rag/query`, `/api/rag/logs` are protected with `requireCapability(Actions.USE_AGENT)`.
+  - This reuses the same `isPro(user)` logic as the agent mode selector.
+- UX improvements:
+  - The Configure page now shows a `USER` / `PRO` badge in the Workflow Copilot panel.
+  - Added quick-action chips: "Analyze workflows", "Suggest improvements", and "Propose CI pipeline".
+  - When a user types intent like "remove the deploy part" the frontend:
+    - Interprets it as a request to disable the deploy stage.
+    - Updates the wizard stages, regenerates the pipeline via `pipeline_generator`, and keeps YAML in sync.
+  - The agent responds with an explanation instead of a generic "no matching tool" error.
+
+## Tests
+
+- Added `test/authorization.test.js` using Node's built-in `node:test` runner to validate authz helpers:
+  - `isPro(user)` returns `false` for `plan = 'free'` unless `beta_pro_granted` is set.
+  - `isPro(user)` returns `true` for `plan = 'pro'` or `beta_pro_granted = true`.
+  - `can(user, Actions.USE_AGENT)` matches the pro gating behavior.
+- `can(user, Actions.USE_MCP_TOOL)` remains allowed for any authenticated user.
+
+---
+
+## Secrets & Preflight (Step 3 of the wizard)
+
+This PR also wires up a real **Secrets & Preflight** step between Configure → Dashboard so users can confirm connections and required GitHub secrets before attempting deploys.
+
+### Backend changes
+
+- **New routes**
+  - `GET /api/connections`
+    - Uses `requireSession` and `getGithubAccessTokenForUser(userId)` to:
+      - Confirm that a GitHub token exists for the current user.
+      - Probe the selected repo via `GET /repos/{owner}/{repo}` to check `permissions.push/admin/maintain/triage`.
+    - Returns `{ githubAppInstalled, githubRepoWriteOk }`.
+    - If GitHub responds 401/403, logs the error and returns both flags as `false`.
+  - `POST /api/secrets/github/presence`
+    - Given `{ repoFullName, env, requiredKeys? }`, checks for required secret *names* using the GitHub Actions Secrets API.
+    - Treats `GITHUB_TOKEN` as always present (built-in) and looks up `AWS_ROLE_ARN` in both repo‑level and environment secrets.
+    - If GitHub responds 401/403, falls back to a conservative response and sets `githubUnauthorized: true` in the payload.
+  - `POST /api/secrets/github/upsert`
+    - Creates/updates GitHub Actions secrets via a new helper module `server/lib/githubSecrets.js` using libsodium (`tweetsodium`) sealed boxes.
+    - Behavior:
+      - If `key === 'GITHUB_TOKEN'`, returns `{ ok: true, builtin: true, scope: 'builtin' }` and does not touch secrets (this is a built-in Actions secret).
+      - If `env` is provided, first attempts to upsert an **environment-level** secret:
+        - `GET /repositories/{id}/environments/{env}/secrets/public-key`.
+        - `PUT /repositories/{id}/environments/{env}/secrets/{key}`.
+      - If the environment public key endpoint returns 404, logs a warning and falls back to a repo‑level secret via:
+        - `GET /repos/{owner}/{repo}/actions/secrets/public-key`.
+        - `PUT /repos/{owner}/{repo}/actions/secrets/{key}`.
+    - Successful responses include scope metadata used by the frontend:
+      - Env success: `{ ok: true, env, scope: 'environment' }`.
+      - Repo success: `{ ok: true, env, scope: 'repo', envFallback: boolean }`.
+- **Helper module**
+  - `server/lib/githubSecrets.js`
+    - Wraps GitHub Actions Secrets REST endpoints for repo + environment secrets.
+    - Provides:
+      - `getRepoId`, `listRepoSecrets`, `listEnvironmentSecrets`.
+      - `upsertRepoSecret`, `upsertEnvironmentSecret` with sodium-based encryption.
+
+### Frontend changes
+
+- **New store state**
+  - `useConfigStore` (Secrets & Preflight) now tracks:
+    - `connections` → `{ githubAppInstalled, githubRepoWriteOk, awsOidc }`.
+    - `secrets` → `[{ key, present }]` for required secrets.
+    - `lastSecretNotice` → one-line explanation of where the last secret was saved.
+    - `preflightResults` → array of `[{ label, ok, info? }]` used to gate the Continue button.
+- **API client hooks** in `client/src/lib/api.ts`:
+  - `getConnections(repo)`
+    - Calls `GET /api/connections?repoFullName=<owner/repo>` via `SERVER_BASE`.
+    - Combines this with OIDC role info from the `oidc_adapter` MCP tool to compute the `connections` object.
+  - `getSecretPresence(repo, env)`
+    - Calls `POST /api/secrets/github/presence` with `{ repoFullName, env }`.
+  - `setSecret({ repo, env, key, value })`
+    - Calls `POST /api/secrets/github/upsert` and returns `{ ok, scope, envFallback, env }`.
+  - `runPreflight({ repo, env, aws })`
+    - Derives a checklist client-side from `connections` + `secrets` + AWS options (role ARN, region).
+- **SecretsPage UX** (`client/src/pages/SecretsPage.tsx`):
+  - Shows a Connections card with:
+    - GitHub App ✓/– (based on `githubAppInstalled`).
+    - Repo write ✓/– (based on `githubRepoWriteOk`).
+    - AWS OIDC ✓ + ARN (based on `connections.awsOidc`).
+  - Environment dropdown for `dev/staging/prod`.
+  - Required Secrets list for `GITHUB_TOKEN` and `AWS_ROLE_ARN`:
+    - `GITHUB_TOKEN` is always shown as `Set ✓` and never editable.
+    - `AWS_ROLE_ARN` exposes an **Add** button that opens a secret modal.
+  - After saving a secret, a small notice explains where it was stored, e.g.:
+    - `Saved AWS_ROLE_ARN as an environment secret for "dev".`
+    - `Saved AWS_ROLE_ARN as a repo-level secret because GitHub environment "dev" does not exist.`
+  - `Run Preflight` recomputes the checklist, and `Continue → Dashboard` remains disabled until all rows are green.
+

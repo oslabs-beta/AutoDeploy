@@ -48,7 +48,8 @@
     "pg": "^8.16.3",
     "zod": "^3.25.76",
     "extract-zip": "^2.0.1",
-    "simple-git": "^3.28.0"
+    "simple-git": "^3.28.0",
+    "tweetsodium": "^0.0.5"
   },
   "devDependencies": {
     "nodemon": "^3.1.10",

@@ -250,17 +250,28 @@ export const api = {
 
   // ===== MCP helpers for repos / branches / pipeline generation =====
   async listRepos(): Promise<{ repos: string[] }> {
+    // If we already have repos cached, reuse them.
     if (cachedRepos && cachedRepos.length > 0) return { repos: cachedRepos };
 
     try {
       const outer = await mcp<{
         success?: boolean;
-        data?: { repositories: { full_name: string }[] };
-        repositories?: { full_name: string }[];
+        data?: { repositories: { full_name: string; branches?: string[] }[] };
+        repositories?: { full_name: string; branches?: string[] }[];
       }>("repo_reader", {});
 
       const body = (outer as any)?.data ?? outer; // unwrap tool payload
-      const repos = body?.repositories?.map((r: any) => r.full_name) ?? [];
+      const repoObjs: any[] = body?.repositories ?? [];
+
+      // Prime the per-repo branch cache from this bulk response so that
+      // selecting a repo does NOT need to call repo_reader again.
+      for (const r of repoObjs) {
+        if (r?.full_name && Array.isArray(r.branches)) {
+          cachedBranches.set(r.full_name, r.branches);
+        }
+      }
+
+      const repos = repoObjs.map((r: any) => r.full_name).filter(Boolean);
       cachedRepos = repos;
       return { repos };
     } catch (err) {
@@ -272,8 +283,11 @@ export const api = {
   },
 
   async listBranches(repo: string): Promise<{ branches: string[] }> {
+    // Use cached branches if we *know* the value, even if it's an empty array.
+    // Map.get returns undefined when missing, so this distinguishes "no cache"
+    // from "cached but empty".
     const cached = cachedBranches.get(repo);
-    if (cached) return { branches: cached };
+    if (cached !== undefined) return { branches: cached };
 
     try {
       const outer = await mcp<{
@@ -289,7 +303,8 @@ export const api = {
       return { branches };
     } catch (err) {
       console.error("[api.listBranches] failed:", err);
-      return { branches: cachedBranches.get(repo) ?? [] };
+      const fallback = cachedBranches.get(repo) ?? [];
+      return { branches: fallback };
     }
   },
 //  async listRepos(): Promise<{ repos: string[] }> {
@@ -409,9 +424,9 @@ export const api = {
     throw new Error("openPr is not implemented on the server (no MCP tool)");
   },
 
-  // --- Mocked config/secrets endpoints for Secrets/Preflight flow ---
+  // --- Config/secrets endpoints for Secrets/Preflight flow ---
   async getConnections(
-    _repo: string
+    repo: string
   ): Promise<{
     githubAppInstalled: boolean;
     githubRepoWriteOk: boolean;
@@ -422,22 +437,50 @@ export const api = {
       region?: string;
     };
   }> {
-    // Try to fetch roles to populate a default role ARN
+    // 1) GitHub connection + repo write status from backend
+    let githubAppInstalled = false;
+    let githubRepoWriteOk = false;
+    try {
+      const url = `${SERVER_BASE}/api/connections?repoFullName=${encodeURIComponent(
+        repo
+      )}`;
+      const res = await fetch(url, {
+        method: 'GET',
+        credentials: 'include',
+      });
+      const base = (await res.json().catch(() => ({}))) as {
+        githubAppInstalled?: boolean;
+        githubRepoWriteOk?: boolean;
+      };
+      if (res.ok) {
+        githubAppInstalled = !!base.githubAppInstalled;
+        githubRepoWriteOk = !!base.githubRepoWriteOk;
+      } else {
+        console.warn('[api.getConnections] /api/connections non-200:', base);
+      }
+    } catch (e) {
+      console.warn('[api.getConnections] /api/connections failed:', e);
+    }
+
+    // 2) AWS OIDC status derived from roles via MCP
     let roleArn: string | undefined;
+    let region: string | undefined;
     try {
       const { roles } = await this.listAwsRoles();
       roleArn = roles[0];
+      region = 'us-east-1';
     } catch (e) {
-      console.warn("[api.getConnections] Failed to load roles:", e);
+      console.warn('[api.getConnections] Failed to load roles:', e);
     }
+
     return {
-      githubAppInstalled: true,
-      githubRepoWriteOk: true,
+      githubAppInstalled,
+      githubRepoWriteOk,
       awsOidc: {
         connected: !!roleArn,
         roleArn,
-        accountId: "123456789012",
-        region: "us-east-1",
+        accountId: '123456789012',
+        region,
       },
     };
   },
@@ -446,9 +489,18 @@ export const api = {
     repo: string,
     env: string
   ): Promise<{ key: string; present: boolean }[]> {
-    const required = ["GITHUB_TOKEN", "AWS_ROLE_ARN"];
-    const store = readSecrets(repo, env);
-    return required.map((k) => ({ key: k, present: !!store[k] }));
+    const res = await fetch(`${SERVER_BASE}/api/secrets/github/presence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ repoFullName: repo, env }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error((data as any)?.error || res.statusText);
+    }
+    const secrets = (data as any)?.secrets ?? [];
+    return secrets as { key: string; present: boolean }[];
   },
 
   async setSecret({
@@ -461,11 +513,18 @@ export const api = {
     env: string;
     key: string;
     value: string;
-  }) {
-    const store = readSecrets(repo, env);
-    store[key] = value;
-    writeSecrets(repo, env, store);
-    return { ok: true } as const;
+  }): Promise<{ ok: boolean; scope?: string; envFallback?: boolean; env?: string | null }> {
+    const res = await fetch(`${SERVER_BASE}/api/secrets/github/upsert`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ repoFullName: repo, env, key, value }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error((data as any)?.error || res.statusText);
+    }
+    return (data as any) ?? { ok: true };
   },
 
   async runPreflight({
@@ -484,9 +543,8 @@ export const api = {
     const role = aws?.roleArn || connections.awsOidc.roleArn;
     const hasAws = !!role;
     const region = aws?.region || connections.awsOidc.region || "us-east-1";
-    const s = Object.fromEntries(
-      secrets.map((x) => [x.key, x.present] as const)
-    );
+
+    const s = Object.fromEntries(secrets.map((x) => [x.key, x.present] as const));
 
     const results = [
       { label: "GitHub App installed", ok: hasGithubApp },

@@ -20,11 +20,13 @@ import authRouter from './routes/authRoutes.js';
 import localAuthRouter from './routes/auth.local.js';
 import userRouter from './routes/usersRoutes.js';
 import systemBannerRouter from './routes/systemBanner.js';
+import connectionsStatusRouter from './routes/connectionsStatus.js';
 import pipelineCommitRouter from './routes/pipelineCommit.js';
 import pipelineSessionsRouter from './routes/pipelineSessions.js';
 import scaffoldCommitRouter from './routes/scaffoldCommit.js';
 import workflowCommitRouter from './routes/workflowCommit.js';
 import ragRouter from './routes/rag.js';
+import githubSecretsRouter from './routes/githubSecrets.js';
 // app.use(authRoutes);
 import jenkinsRouter from './routes/jenkins.js';
 
@@ -79,6 +81,7 @@ app.get('/db/ping', async (_req, res) => {
 // Routes
 app.use("/api", meRouter);
 app.use("/api", systemBannerRouter);
+app.use('/api', connectionsStatusRouter);
 app.use('/api/rag', ragRouter);
 // Admin-ish user management routes (all of these are now authz-protected
 // inside usersRoutes.js using MANAGE_USERS capability).
@@ -110,6 +113,7 @@ app.use(authRouter);
 // app.use('/auth/aws', authAws);
 app.use('/auth/google', authGoogle);
 app.use('/jenkins', jenkinsRouter);
+app.use('/api/secrets/github', githubSecretsRouter);
 app.use('/pipeline-sessions', pipelineSessionsRouter);
 
 // Legacy inline /users endpoints have been superseded by routes/usersRoutes.js,
