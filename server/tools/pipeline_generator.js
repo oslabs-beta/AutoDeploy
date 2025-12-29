@@ -11,7 +11,12 @@ export const pipeline_generator = {
     repo: z.string(),
     branch: z.string().default("main"),
     provider: z.enum(["aws", "jenkins", "gcp"]).optional().default("aws"),
-    template: z.enum(["node_app", "python_app", "container_service"]),
+    template: z.enum([
+      "node_app",
+      "python_app",
+      "container_service",
+      "aws_static_vite",
+    ]),
     stages: z.array(z.enum(["build", "test", "deploy"])).optional(),
     options: z
       .object({
@@ -24,6 +29,11 @@ export const pipeline_generator = {
         awsRegion: z.string().optional(),
         gcpServiceAccountEmail: z.string().optional(),
         stages: z.array(z.enum(["build", "test", "deploy"])).optional(),
+        // Additional fields for aws_static_vite template
+        awsAccountId: z.string().optional(),
+        s3Bucket: z.string().optional(),
+        cloudFrontDistributionId: z.string().optional(),
+        outputDir: z.string().optional(),
       })
       .optional(),
   }),
@@ -39,6 +49,10 @@ export const pipeline_generator = {
       awsSessionName: options?.awsSessionName,
       awsRegion: options?.awsRegion,
       stages: stages ?? options?.stages,
+      awsAccountId: options?.awsAccountId,
+      s3Bucket: options?.s3Bucket,
+      cloudFrontDistributionId: options?.cloudFrontDistributionId,
+      outputDir: options?.outputDir,
     };
     normalized.gcpServiceAccountEmail = options?.gcpServiceAccountEmail;
 
@@ -103,6 +117,95 @@ export const pipeline_generator = {
     // Try DB lookup for GitHub token first
     let githubToken = null;
     try {
+      // Template-specific: AWS static Vite frontend
+      if (template === "aws_static_vite" && provider === "aws") {
+        const resolvedStages = Array.isArray(normalized.stages) && normalized.stages.length > 0
+          ? normalized.stages
+          : ["build", "deploy"]; // test stage is optional for this template
+
+        const nodeVersion = normalized.nodeVersion ?? "20";
+        const installCmd = normalized.installCmd ?? "npm ci";
+        const buildCmd = normalized.buildCmd ?? "npm run build";
+        const awsRegion = normalized.awsRegion ?? "us-east-1";
+        const awsRoleArn = normalized.awsRoleArn ?? "REPLACE_ME";
+        const outputDir = normalized.outputDir ?? "dist";
+        const s3Bucket = normalized.s3Bucket ?? "REPLACE_ME_BUCKET";
+        const cloudFrontDistributionId =
+          normalized.cloudFrontDistributionId ?? "REPLACE_ME_DISTRIBUTION";
+
+        const jobs = [];
+
+        if (resolvedStages.includes("build")) {
+          jobs.push(`
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${nodeVersion}
+      - name: Install dependencies
+        run: ${installCmd}
+      - name: Build frontend
+        run: ${buildCmd}
+`);
+        }
+
+        if (resolvedStages.includes("deploy")) {
+          const needsJob = resolvedStages.includes("build") ? "build" : undefined;
+
+          jobs.push(`
+  deploy:
+    ${needsJob ? `needs: ${needsJob}
+    ` : ""}runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${awsRoleArn}
+          role-session-name: ${normalized.awsSessionName ?? "autodeploy"}
+          aws-region: ${awsRegion}
+      - name: Sync assets to S3
+        run: aws s3 sync ${outputDir} s3://${s3Bucket} --delete
+      - name: Invalidate CloudFront cache
+        run: aws cloudfront create-invalidation --distribution-id ${cloudFrontDistributionId} --paths '/*'
+`);
+        }
+
+        const generated_yaml = `
+name: CI/CD – AWS Static Frontend (Vite)
+
+permissions:
+  id-token: write
+  contents: read
+
+on:
+  push:
+    branches:
+      - ${branch}
+
+jobs:
+${jobs.join("\n")}
+`;
+
+        return {
+          success: true,
+          data: {
+            pipeline_name: `aws-aws_static_vite-ci.yml`,
+            repo,
+            branch,
+            provider,
+            template,
+            options: options || {},
+            stages: resolvedStages,
+            generated_yaml,
+            created_at: new Date().toISOString(),
+          },
+        };
+      }
+
       // Handle GCP via adapter
       if (provider === "gcp") {
         const gcpResult = await gcp_adapter.handler({

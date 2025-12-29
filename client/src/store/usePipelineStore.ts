@@ -17,6 +17,11 @@ type PipelineState = {
     awsSessionName?: string;
     awsRegion?: string;
     gcpServiceAccountEmail?: string;
+    // AWS static frontend (Vite) extras
+    awsAccountId?: string;
+    s3Bucket?: string;
+    cloudFrontDistributionId?: string;
+    outputDir?: string;
   };
   provider: 'aws' | 'gcp' | 'jenkins';
 
@@ -93,6 +98,19 @@ const TEMPLATE_DEFAULT_OPTIONS: Record<string, PipelineState['options']> = {
     awsSessionName: 'autodeploy',
     awsRegion: 'us-east-1',
     gcpServiceAccountEmail: '',
+  },
+  aws_static_vite: {
+    nodeVersion: '20',
+    installCmd: 'npm ci',
+    testCmd: '',
+    buildCmd: 'npm run build',
+    awsSessionName: 'autodeploy',
+    awsRegion: 'us-east-1',
+    gcpServiceAccountEmail: '',
+    awsAccountId: '',
+    s3Bucket: '',
+    cloudFrontDistributionId: '',
+    outputDir: 'dist',
   },
 };
 

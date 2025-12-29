@@ -239,6 +239,10 @@ AutoDeploy/
 └── client/package.json   # Frontend scripts (dev, build, lint, preview)
 ```
 
+## Repo housekeeping
+
+Most internal Markdown documentation (design docs, technical notes, etc.) is intentionally not tracked in git. By default, only the root `README.md` and `client/README.md` are versioned to keep the repo lean.
+
 ## License
 
 This project is licensed under the **ISC License** (see `package.json`).

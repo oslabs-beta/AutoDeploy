@@ -212,3 +212,9 @@ This PR also wires up a real **Secrets & Preflight** step between Configure → 
     - `Saved AWS_ROLE_ARN as a repo-level secret because GitHub environment "dev" does not exist.`
   - `Run Preflight` recomputes the checklist, and `Continue → Dashboard` remains disabled until all rows are green.
 
+---
+
+## Repo housekeeping
+
+- Updated `.gitignore` to ignore all Markdown files by default, except the root `README.md` and `client/README.md`.
+- Kept internal design docs (for example under `server/readme/`) as local-only helpers that remain ignored by git.

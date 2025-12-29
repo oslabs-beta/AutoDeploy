@@ -247,8 +247,3 @@ The **Workflow Copilot Agent** is a lightweight, chat-based assistant that helps
   - Introduce optional, explicit “auto-PR” capabilities if/when you’re comfortable letting the agent propose branches/PRs automatically.
 
 ---
-
-If you’d like, the next step can be a short **technical design** for:
-- Frontend chat panel shape + where the one-clicks live.
-- Backend route(s) for “copilot chat” with User vs Pro logic.
-- How `/api/rag` is invoked and how we choose which files to index per request.

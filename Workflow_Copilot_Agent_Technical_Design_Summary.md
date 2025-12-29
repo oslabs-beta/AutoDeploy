@@ -3528,5 +3528,5 @@ Set it based on presence of `workflow_profile`, `suggestions`, `generated_yaml`.
 
 ---
 
-If you want, next step I can:  
-- Draft the exact code changes (backend first, then frontend) and apply them in your repo.
+ ~/Documents/codesmith/autodeploy/ [paython-mcp*] npm install
+npm warn deprecated tweetsodium@0.0.5: tweetsodium is deprecated and unmaintained. Please consider using libsodium.js, maintained by the same author as libsodium: https://github.com/jedisct1/libsodium.js

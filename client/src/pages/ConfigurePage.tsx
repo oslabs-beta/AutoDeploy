@@ -364,6 +364,7 @@ export default function ConfigurePage() {
                 <option value="node_app">Node.js app</option>
                 <option value="python_app">Python App</option>
                 <option value="container_service">Container</option>
+                <option value="aws_static_vite">AWS Static Frontend (Vite)</option>
               </select>
               <span className="text-xs text-slate-200">
                 Pick the closest match to your repo; the MCP backend refines it.
@@ -462,7 +463,9 @@ export default function ConfigurePage() {
                 <span className="text-sm font-medium">AWS Role (OIDC)</span>
                 <select
                   disabled={busy || !roles.length}
-                  value={options.awsRoleArn ?? ""}
+                  value={roles.some((r) => r.arn === options.awsRoleArn)
+                    ? options.awsRoleArn ?? ""
+                    : ""}
                   onChange={(e) => setOption("awsRoleArn", e.target.value)}
                   className="rounded-md border border-white/25 px-3 py-2 text-sm bg-black text-white"
                 >
@@ -474,9 +477,22 @@ export default function ConfigurePage() {
                   ))}
                 </select>
                 <span className="text-xs text-slate-200">
-                  Roles come from the backend OIDC adapter; we’ll wire this into
-                  the deploy job.
+                  Roles currently come from a mock OIDC adapter; for production,
+                  you can also paste a custom ARN below.
                 </span>
+              </label>
+
+              <label className="grid gap-1">
+                <span className="text-xs text-slate-200">
+                  Or paste a custom IAM Role ARN
+                </span>
+                <input
+                  disabled={busy}
+                  value={options.awsRoleArn ?? ""}
+                  onChange={(e) => setOption("awsRoleArn", e.target.value)}
+                  className="rounded-md border border-white/25 px-3 py-2 text-xs font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                  placeholder="arn:aws:iam::123456789012:role/github-oidc-role"
+                />
               </label>
               <label className="grid gap-1">
                 <span className="text-sm font-medium">AWS Role Session Name</span>
@@ -499,6 +515,54 @@ export default function ConfigurePage() {
                   placeholder="us-east-1"
                 />
               </label>
+
+              {template === "aws_static_vite" && (
+                <>
+                  <label className="grid gap-1">
+                    <span className="text-sm font-medium text-white">AWS Account ID</span>
+                    <input
+                      disabled={busy}
+                      value={options.awsAccountId ?? ""}
+                      onChange={(e) => setOption("awsAccountId", e.target.value)}
+                      className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                      placeholder="123456789012"
+                    />
+                  </label>
+
+                  <label className="grid gap-1">
+                    <span className="text-sm font-medium text-white">S3 Bucket</span>
+                    <input
+                      disabled={busy}
+                      value={options.s3Bucket ?? ""}
+                      onChange={(e) => setOption("s3Bucket", e.target.value)}
+                      className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                      placeholder="autodeploy-landing-prod"
+                    />
+                  </label>
+
+                  <label className="grid gap-1">
+                    <span className="text-sm font-medium text-white">CloudFront Distribution ID</span>
+                    <input
+                      disabled={busy}
+                      value={options.cloudFrontDistributionId ?? ""}
+                      onChange={(e) => setOption("cloudFrontDistributionId", e.target.value)}
+                      className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                      placeholder="E123ABC456XYZ"
+                    />
+                  </label>
+
+                  <label className="grid gap-1">
+                    <span className="text-sm font-medium text-white">Output directory</span>
+                    <input
+                      disabled={busy}
+                      value={options.outputDir ?? ""}
+                      onChange={(e) => setOption("outputDir", e.target.value)}
+                      className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                      placeholder="dist"
+                    />
+                  </label>
+                </>
+              )}
               </>
             )}
 
