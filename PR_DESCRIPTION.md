@@ -1,4 +1,4 @@
-# Summary
+## Summary
 
 Add first-party RAG support directly to the AutoDeploy backend so we can ingest repos, embed them into Pinecone, and answer questions about them without depending on the separate AskMyRepo service.
 
@@ -78,7 +78,29 @@ Add first-party RAG support directly to the AutoDeploy backend so we can ingest 
   - `query_history(job_id text, question text, answer text, created_at timestamptz default now(), …)`
   - `logs(session_id text, question text, prompt text, answer text, created_at timestamptz default now(), …)`
 
-# Testing
+## Testing
+
+### Workflow Copilot + pipeline history enhancements
+
+- **MCP agent / Workflow Copilot**
+  - Pro users now get a RAG-backed "Analyze workflows" experience that:
+    - Ingests only workflow YAMLs via `POST /api/rag/ingest/github-workflows` (dot-directories enabled so `.github/workflows/**` is indexed).
+    - Queries that namespace via `POST /api/rag/query` and surfaces a repo-aware summary + structured suggestions.
+  - Regular users keep a simpler experience:
+    - "Analyze workflows" returns GitHub workflow listings and summaries via MCP tools.
+    - "Suggest improvements" is an LLM-only prompt (no RAG), so it's clearly distinct from Analyze.
+  - Added verbose logging around this flow (`[RAG][ingest]`, `[RAG][query]`, `[RAG][workflow-analysis]`) so we can see namespaces, file counts, sources, and answer diagnostics when shaping outputs.
+
+- **Dashboard / pipeline history**
+  - Fixed the client to read the actual pipeline history envelope from `/mcp/v1/pipeline_history` (`{ ok: true, data: { versions: { rows: [...] } } }`) instead of assuming `payload.versions?.rows`.
+  - `DashboardPage` now correctly loads `Pipeline History (YAML versions)` for the selected `repoFullName + branch + workflowPath` and renders entries.
+  - History is scoped to the workflow path that was committed (e.g. `.github/workflows/dev-deploy.yml` vs `.github/workflows/ci.yml`).
+
+- **YAML generator robustness**
+  - Fixed `pipeline_generator` indentation for the runtime setup step so the generated `with:` blocks are always nested correctly under the appropriate step.
+  - Added a `server/tests/pipelineGeneratorYaml.test.js` Node test that:
+    - Calls `pipeline_generator.handler` for `node_app` and `python_app` with typical options.
+    - Parses the returned `generated_yaml` via `js-yaml` and fails fast if the YAML is not syntactically valid.
 
 - Manually verified end-to-end with a real GitHub repo:
 

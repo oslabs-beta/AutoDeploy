@@ -99,6 +99,59 @@ async function ingestWorkspaceCodeToNamespace({ workspace, namespace, repoSlug, 
   return { fileCount: codeFiles.length, chunkCount: chunks.length, upserted };
 }
 
+// Variant ingest helper that ONLY indexes YAML/YML files. Used by
+// Workflow Copilot so that we ingest just GitHub Actions workflows
+// instead of the entire repository.
+async function ingestWorkspaceYamlToNamespace({ workspace, namespace, repoSlug, userId }) {
+  const files = await fg(['**/*.*'], {
+    cwd: workspace,
+    onlyFiles: true,
+    ignore: IGNORE,
+    // We explicitly want to see .github/workflows and other dot-directories
+    dot: true,
+  });
+
+  const yamlFiles = files.filter(
+    (p) => /\.ya?ml$/i.test(p) && !shouldSkipFile(p)
+  );
+
+  const chunks = [];
+  for (const rel of yamlFiles) {
+    const full = path.join(workspace, rel);
+    let text = '';
+    try {
+      text = await fs.readFile(full, 'utf8');
+    } catch {
+      // ignore unreadable files
+    }
+    if (!text) continue;
+    const parts = chunkText(text);
+    parts.forEach((t, idx) => chunks.push({ path: rel, idx, text: t }));
+  }
+
+  let upserted = 0;
+  const BATCH = 64;
+  for (let i = 0; i < chunks.length; i += BATCH) {
+    const slice = chunks.slice(i, i + BATCH);
+    const vectors = await embedBatch(slice.map((c) => c.text));
+    const payload = vectors.map((values, k) => ({
+      id: `${namespace}:${i + k}`,
+      values,
+      metadata: {
+        path: slice[k].path,
+        idx: slice[k].idx,
+        text: slice[k].text,
+        repo: repoSlug,
+        user_id: String(userId),
+      },
+    }));
+    await upsertVectors(namespace, payload);
+    upserted += payload.length;
+  }
+
+  return { fileCount: yamlFiles.length, chunkCount: chunks.length, upserted };
+}
+
 // --- POST /api/rag/ingest/zip ---
 // multipart/form-data
 // - repoZip: .zip file (required)
@@ -220,6 +273,81 @@ router.post('/ingest/github', requireSession, requireCapability(Actions.USE_AGEN
       });
     } finally {
       // best-effort cleanup
+      try {
+        await fs.rm(workspace, { recursive: true, force: true });
+      } catch {
+        // ignore
+      }
+    }
+  } catch (e) {
+    return next(e);
+  }
+});
+
+// --- POST /api/rag/ingest/github-workflows ---
+// JSON body: { repoUrl }
+// Ingests ONLY .yml/.yaml files (e.g., GitHub Actions workflows) into the
+// user's namespace for this repo. Used by the Workflow Copilot's pro
+// analysis path.
+router.post('/ingest/github-workflows', requireSession, requireCapability(Actions.USE_AGENT), async (req, res, next) => {
+  try {
+    const { repoUrl } = req.body || {};
+
+    console.log('[RAG][route] /api/rag/ingest/github-workflows called', {
+      repoUrl,
+      userId: getUserId(req),
+    });
+
+    if (!repoUrl) {
+      return res.status(400).json({ error: 'Missing "repoUrl" in body' });
+    }
+
+    const parsed = parseGitHubRepoUrl(repoUrl);
+    if (!parsed) {
+      return res.status(400).json({ error: 'Invalid GitHub repoUrl' });
+    }
+
+    const repoSlug = `${parsed.owner}/${parsed.repo}`;
+    const userId = getUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: 'No active session' });
+    }
+
+    const namespace = buildNamespace({ userId, repoSlug });
+
+    const workspace = path.join(
+      os.tmpdir(),
+      `rag_github_wf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    );
+
+    try {
+      await fs.mkdir(workspace, { recursive: true });
+      const repoDir = path.join(workspace, 'repo');
+      await cloneGithubRepoShallow({ repoUrl, dest: repoDir });
+
+      const { fileCount, chunkCount, upserted } = await ingestWorkspaceYamlToNamespace({
+        workspace: repoDir,
+        namespace,
+        repoSlug,
+        userId,
+      });
+
+      console.log('[RAG][route] GitHub workflows ingest complete', {
+        namespace,
+        repo: { owner: parsed.owner, repo: parsed.repo },
+        fileCount,
+        chunkCount,
+        upserted,
+      });
+
+      return res.status(200).json({
+        namespace,
+        repo: { owner: parsed.owner, repo: parsed.repo },
+        fileCount,
+        chunkCount,
+        upserted,
+      });
+    } finally {
       try {
         await fs.rm(workspace, { recursive: true, force: true });
       } catch {

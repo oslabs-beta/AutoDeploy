@@ -218,6 +218,10 @@ These cover:
 - `isPro(user)` behavior for free vs pro vs beta-pro users.
 - `can(user, Actions.USE_AGENT)` (agent + RAG gating) vs `can(user, Actions.USE_MCP_TOOL)` (MCP access for all authenticated users).
 
+### Additional backend tests
+
+- `node --test server/tests/pipelineGeneratorYaml.test.js` – sanity-checks that `pipeline_generator` always emits syntactically valid GitHub Actions YAML for the main templates (`node_app`, `python_app`). This guards against indentation/`with:` mapping regressions.
+
 ## Project Structure
 
 High‑level layout:

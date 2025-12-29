@@ -117,9 +117,65 @@ function normalizeGithubRepoUrl(repoUrlOrSlug) {
   return `https://github.com/${slug}`;
 }
 
+// Lightweight YAML summarization used in user mode when analyzing workflows
+async function summarizeWorkflowYamlForUser({ repoSlug, workflowName, workflowPath, yaml }) {
+  if (!yaml || typeof yaml !== 'string' || !yaml.trim()) return '';
+
+  let client;
+  try {
+    client = getOpenAIClient();
+  } catch (e) {
+    console.warn(
+      '⚠️ Skipping workflow YAML summaries (OpenAI not configured):',
+      e?.message || e
+    );
+    return '';
+  }
+
+  try {
+    const resp = await client.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are a CI/CD assistant. Given a GitHub Actions workflow YAML, briefly explain when it runs (triggers) and what its main jobs/steps do. Then suggest 1-3 concrete, practical improvements. Keep the answer under 200 words.',
+        },
+        {
+          role: 'user',
+          content:
+            `Repository: ${repoSlug}\n` +
+            `Workflow: ${workflowName}\n` +
+            `Path: ${workflowPath}\n\n` +
+            'YAML:\n' +
+            yaml,
+        },
+      ],
+    });
+
+    const text = resp?.choices?.[0]?.message?.content || '';
+    return text.trim();
+  } catch (e) {
+    console.warn(
+      '⚠️ Failed to summarize workflow YAML for user mode:',
+      e?.message || e
+    );
+    return '';
+  }
+}
+
 async function ragIngestGithub({ repoUrl, cookie }) {
   const githubUrl = normalizeGithubRepoUrl(repoUrl);
-  const res = await fetch(`${RAG_BASE_URL}/api/rag/ingest/github`, {
+  console.log('[RAG][ingest] Starting GitHub workflows ingest', {
+    repoUrl,
+    normalized: githubUrl,
+    RAG_BASE_URL,
+  });
+
+  // For workflow analysis we only need YAML workflows, not the
+  // entire repository. Use the /ingest/github-workflows endpoint
+  // which indexes just .yml/.yaml files.
+  const res = await fetch(`${RAG_BASE_URL}/api/rag/ingest/github-workflows`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -130,12 +186,32 @@ async function ragIngestGithub({ repoUrl, cookie }) {
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
+    console.error('[RAG][ingest] GitHub workflows ingest failed', {
+      status: res.status,
+      error: data?.error,
+      body: data,
+    });
     throw new Error(data?.error || `RAG ingest failed with status ${res.status}`);
   }
+
+  console.log('[RAG][ingest] GitHub workflows ingest succeeded', {
+    namespace: data?.namespace,
+    repo: data?.repo,
+    fileCount: data?.fileCount,
+    chunkCount: data?.chunkCount,
+    upserted: data?.upserted,
+  });
+
   return data; // includes { namespace, repo, fileCount, ... }
 }
 
 async function ragQueryNamespace({ namespace, question, topK = 5, cookie }) {
+  console.log('[RAG][query] Starting namespace query', {
+    namespace,
+    topK,
+    questionPreview: (question || '').slice(0, 200),
+  });
+
   const res = await fetch(`${RAG_BASE_URL}/api/rag/query`, {
     method: 'POST',
     headers: {
@@ -147,8 +223,23 @@ async function ragQueryNamespace({ namespace, question, topK = 5, cookie }) {
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
+    console.error('[RAG][query] Namespace query failed', {
+      status: res.status,
+      error: data?.error,
+      body: data,
+    });
     throw new Error(data?.error || `RAG query failed with status ${res.status}`);
   }
+
+  console.log('[RAG][query] Namespace query succeeded', {
+    namespace,
+    answerPreview: (data?.answer || '').slice(0, 200),
+    sourceCount: Array.isArray(data?.sources) ? data.sources.length : 0,
+    sources: Array.isArray(data?.sources)
+      ? data.sources.map((s) => ({ path: s.path, idx: s.idx, score: s.score }))
+      : [],
+  });
+
   return data; // { answer, sources }
 }
 
@@ -270,7 +361,7 @@ Tell me what you’d like to do next.
     pipelineSnapshot?.repo ||
     null;
 
-  // User mode: try lightweight workflow analysis via github_adapter (no RAG)
+// User mode: try lightweight workflow analysis via github_adapter (no RAG)
   if (mode === 'user' && repoUrlFromInput && looksLikeWorkflowAnalysis) {
     try {
       let slug = null;
@@ -296,9 +387,10 @@ Tell me what you’d like to do next.
           cookie
         );
 
-        const body = outer && typeof outer === 'object' && 'data' in outer
-          ? outer.data
-          : outer;
+        const body =
+          outer && typeof outer === 'object' && 'data' in outer
+            ? outer.data
+            : outer;
         const workflows = body?.workflows;
 
         if (Array.isArray(workflows)) {
@@ -323,7 +415,51 @@ Tell me what you’d like to do next.
                 `${idx + 1}. ${wf.name} (${wf.state}) — ${wf.path}`
             ),
           ];
-          const reply = lines.join('\n');
+
+          // Enrich each workflow with a brief summary + suggestions by
+          // fetching the YAML via github_adapter (file action) and calling
+          // the LLM. This only runs in user mode and degrades gracefully
+          // if OpenAI is not configured or if any individual call fails.
+          const detailSections = [];
+          for (const wf of workflows) {
+            try {
+              const fileOuter = await callMCPTool(
+                'github_adapter',
+                { action: 'file', repo: slug, path: wf.path },
+                cookie
+              );
+              const fileBody =
+                fileOuter && typeof fileOuter === 'object' && 'data' in fileOuter
+                  ? fileOuter.data
+                  : fileOuter;
+
+              const yaml = fileBody?.file?.content || null;
+              const summary = await summarizeWorkflowYamlForUser({
+                repoSlug: slug,
+                workflowName: wf.name,
+                workflowPath: wf.path,
+                yaml,
+              });
+
+              if (summary) {
+                detailSections.push(
+                  [
+                    '',
+                    '---',
+                    `${wf.name} (${wf.state}) — ${wf.path}`,
+                    summary,
+                  ].join('\n')
+                );
+              }
+            } catch (innerErr) {
+              console.warn(
+                '⚠️ Failed to fetch or summarize workflow YAML in user mode:',
+                innerErr?.message || innerErr
+              );
+            }
+          }
+
+          const reply = [...lines, ...detailSections].join('\n');
 
           return {
             success: true,
@@ -350,6 +486,13 @@ Tell me what you’d like to do next.
       const ragQuestion =
         userPromptText +
         '\n\nFocus your answer specifically on CI/CD workflows (GitHub Actions, tests, builds, and deployments) for this repository.';
+
+      console.log('[RAG][workflow-analysis] Pro user workflow analysis request', {
+        userId: user?.user_id || user?.id,
+        repoUrl: repoUrlFromInput,
+        questionPreview: ragQuestion.slice(0, 200),
+      });
+
       const ragResult = await askRagForWorkflows({
         user,
         repoUrl: repoUrlFromInput,
@@ -357,10 +500,28 @@ Tell me what you’d like to do next.
         cookie,
       });
 
+      console.log('[RAG][workflow-analysis] Query result meta', {
+        namespace: ragResult?.namespace,
+        suggestionCount: Array.isArray(ragResult?.suggestions)
+          ? ragResult.suggestions.length
+          : 0,
+        sourceCount: Array.isArray(ragResult?.sources)
+          ? ragResult.sources.length
+          : 0,
+      });
+
       const rawAnswer = ragResult.answer || '';
       const noWorkflowContext = /does not include any specific information about the CI\/CD workflows|cannot analyze your current workflows/i.test(
         rawAnswer
       );
+
+      console.log('[RAG][workflow-analysis] Answer diagnostics', {
+        noWorkflowContext,
+        answerPreview: rawAnswer.slice(0, 400),
+        sources: Array.isArray(ragResult?.sources)
+          ? ragResult.sources.map((s) => ({ path: s.path, idx: s.idx, score: s.score }))
+          : [],
+      });
 
       const reply = noWorkflowContext
         ? 'I couldn’t find any existing CI/CD workflows in the code I ingested for this repo. Based on general best practices, here are workflow improvements you might consider adding.'
@@ -380,7 +541,11 @@ Tell me what you’d like to do next.
     } catch (e) {
       console.warn(
         '⚠️ RAG workflow analysis failed, falling back to default agent path:',
-        e?.message || e
+        e?.message || e,
+        {
+          repoUrl: repoUrlFromInput,
+          mode,
+        }
       );
       // fall through to normal agent behavior
     }
@@ -689,14 +854,23 @@ Tell me what you’d like to do next.
           output?.data?.data?.generated_yaml ||
           output?.data?.generated_yaml ||
           null;
+
+        // Surface pipeline_name if the tool provided one so the UI and
+        // the user see the exact file that will be committed.
+        const pipelineNameFromTool =
+          output?.data?.data?.pipeline_name ||
+          output?.data?.pipeline_name ||
+          pipelineSnapshot?.pipeline_name ||
+          '.github/workflows/ci.yml';
+
         // Return confirmation-required structure
         return {
           success: true,
           requires_confirmation: true,
           reply:
-            'I generated a CI/CD workflow YAML for this repo based on your current settings. Review it in the UI and decide whether to commit it.',
+            `I generated a CI/CD workflow YAML for this repo based on your current settings. It will live at ${pipelineNameFromTool}. Review it in the UI and decide whether to commit it.`,
           message:
-            'A pipeline has been generated. Would you like me to commit this workflow file to your repository?',
+            `A pipeline has been generated at ${pipelineNameFromTool}. Would you like me to commit this workflow file to your repository?`,
           suggestions: [
             {
               id: 'review-yaml',
@@ -714,7 +888,10 @@ Tell me what you’d like to do next.
           agent_decision: agentMeta.agent_decision,
           tool_called: agentMeta.tool_called,
           generated_yaml: generatedYaml,
-          pipeline_metadata: output,
+          pipeline_metadata: {
+            ...output,
+            pipeline_name: pipelineNameFromTool,
+          },
         };
       }
 

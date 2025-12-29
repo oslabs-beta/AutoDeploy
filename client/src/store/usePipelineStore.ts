@@ -39,6 +39,10 @@ type PipelineState = {
   // Have we already loaded roles this session?
   rolesLoaded: boolean;
 
+  // Discovered workflows for the current repo (if any)
+  workflows: { name: string; path: string; state: string }[];
+  selectedWorkflowPath?: string;
+
   // Derived getter to surface the currently effective YAML
   getEffectiveYaml: () => string | undefined;
 };
@@ -56,6 +60,10 @@ type PipelineActions = {
   regenerate(payload: { repo: string; branch: string }): Promise<void>;
   openPr(args: { repo: string; branch: string }): Promise<void>;
 
+  // Workflows discovered for the selected repo
+  loadWorkflows(repo: string): Promise<void>;
+  selectWorkflow(repo: string, path: string): Promise<void>;
+
   setEditing(b: boolean): void;
   setEditedYaml(y: string): void;
   resetYaml(): void;
@@ -69,6 +77,9 @@ type PipelineActions = {
 
   // Allow updating the stored YAML after manual edits (Dashboard)
   setResultYaml(yaml: string): void;
+
+  // Control the workflow file name (e.g. ci.yml)
+  setPipelineName(name: string): void;
 };
 
 const TEMPLATE_DEFAULT_OPTIONS: Record<string, PipelineState['options']> = {
@@ -132,6 +143,8 @@ const initial: PipelineState = {
   status: 'idle',
   error: undefined,
   rolesLoaded: false, // guards MCP calls
+  workflows: [],
+  selectedWorkflowPath: undefined,
   getEffectiveYaml: () => undefined,
 };
 
@@ -322,6 +335,49 @@ export const usePipelineStore = create<PipelineState & PipelineActions>()(
           yaml,
         },
       });
+    },
+
+    setPipelineName(name: string) {
+      const r = get().result ?? {};
+      set({
+        result: {
+          ...r,
+          pipeline_name: name,
+        },
+      });
+    },
+
+    // ============================
+    //    WORKFLOW DISCOVERY
+    // ============================
+
+    async loadWorkflows(repo: string) {
+      try {
+        const workflows = await api.listWorkflows(repo);
+        set({ workflows });
+      } catch (err) {
+        console.error('[usePipelineStore] loadWorkflows failed:', err);
+        set({ workflows: [] });
+      }
+    },
+
+    async selectWorkflow(repo: string, path: string) {
+      set({ selectedWorkflowPath: path });
+      try {
+        const yaml = await api.getWorkflowFile(repo, path);
+        if (yaml && yaml.trim().length > 0) {
+          // Treat this as the current pipeline YAML, but do NOT mutate
+          // template/options/stages. This is a safe, view/edit-only path.
+          get().setResultYaml(yaml);
+        }
+        // Also set the pipeline_name to this file's basename so that
+        // downstream commit flows use the same path.
+        const parts = path.split('/');
+        const fileName = parts[parts.length - 1] || 'ci.yml';
+        get().setPipelineName(fileName);
+      } catch (err) {
+        console.error('[usePipelineStore] selectWorkflow failed:', err);
+      }
     },
 
     setEditing: (b) => set({ editing: b }),

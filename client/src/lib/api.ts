@@ -139,8 +139,9 @@ export const api = {
       throw new Error(payload.error || res.statusText || "History failed");
     }
 
-    // Back-end shape: { ok: true, versions: { rows: [...] } }
-    const rows = (payload.versions?.rows ?? []) as PipelineVersion[];
+    // Back-end shape: { ok: true, data: { versions: { rows: [...] } } }
+    const pgResult = (payload.data?.versions ?? payload.versions ?? {}) as any;
+    const rows = (pgResult.rows ?? []) as PipelineVersion[];
     return rows;
   },
 
@@ -393,6 +394,47 @@ export const api = {
       options: options || {},
     });
     return data;
+  },
+
+  // ===== GitHub Actions workflows (MCP-backed) =====
+
+  async listWorkflows(repo: string): Promise<{
+    name: string;
+    path: string;
+    state: string;
+  }[]> {
+    try {
+      const outer = await mcp<{
+        workflows?: { name: string; path: string; state: string }[];
+      }>("github_adapter", { action: "workflows", repo });
+
+      const body = (outer as any)?.data ?? outer;
+      return (body?.workflows ?? []) as {
+        name: string;
+        path: string;
+        state: string;
+      }[];
+    } catch (err) {
+      console.error("[api.listWorkflows] failed:", err);
+      return [];
+    }
+  },
+
+  async getWorkflowFile(repo: string, path: string): Promise<string | null> {
+    try {
+      const outer = await mcp<{
+        file?: { content?: string };
+      }>("github_adapter", { action: "file", repo, path });
+
+      const body = (outer as any)?.data ?? outer;
+      const content = body?.file?.content;
+      return typeof content === "string" && content.trim().length > 0
+        ? content
+        : null;
+    } catch (err) {
+      console.error("[api.getWorkflowFile] failed:", err);
+      return null;
+    }
   },
 
   // ===== OIDC roles (AWS) with caching =====

@@ -36,6 +36,8 @@ export default function ConfigurePage() {
     status,
     error,
     result,
+    workflows,
+    selectedWorkflowPath,
     setTemplate,
     setProvider,
     toggleStage,
@@ -50,6 +52,9 @@ export default function ConfigurePage() {
     setEditedYaml,
     getEffectiveYaml,
     hydrateFromWizard,
+    loadWorkflows,
+    selectWorkflow,
+    setPipelineName,
   } = usePipelineStore();
 
   const {
@@ -83,6 +88,12 @@ export default function ConfigurePage() {
     loadAwsRoles().catch(console.error);
   }, [repo, branch, provider, loadAwsRoles]);
 
+  // Load existing workflows for the selected repo (if any)
+  useEffect(() => {
+    if (!repo) return;
+    loadWorkflows(repo).catch(console.error);
+  }, [repo, loadWorkflows]);
+
   const handleGenerate = async () => {
     if (!repo || !branch) {
       alert("Pick a repo + branch on the Connect page first.");
@@ -97,6 +108,20 @@ export default function ConfigurePage() {
       stages,
       options,
     });
+  };
+
+  const handleProposePipeline = async () => {
+    // For regular users (non-pro), "Propose CI pipeline" should directly
+    // generate a pipeline using the current form settings, without
+    // going through the free-form agent chat.
+    if (!isPro) {
+      await handleGenerate();
+      return;
+    }
+
+    // Pro users keep the agent-driven behavior.
+    setChatInput("Propose a complete GitHub Actions CI pipeline for this repo.");
+    setTimeout(() => handleSendChat(), 0);
   };
 
   const handleOpenPr = async () => {
@@ -125,8 +150,10 @@ export default function ConfigurePage() {
     // The AI is a planner, not an authority. UI state must be updated first.
     const lower = trimmed.toLowerCase();
 
-    // Reset to defaults first
-    let nextStages: Array<"build" | "test" | "deploy"> = ["build", "test", "deploy"];
+    // Start from the current UI state; the wizard is a planner, not an
+    // authority. We only change stages when the user explicitly asks
+    // (e.g. "no deploy", "just build").
+    let nextStages: Array<"build" | "test" | "deploy"> = [...stages];
 
     if (lower.includes("just build") || lower.includes("only build")) {
       nextStages = ["build"];
@@ -210,6 +237,10 @@ export default function ConfigurePage() {
         branch,
         stages: nextStages,
         options,
+        // If we already have a pipeline_name (e.g. from Existing workflows
+        // or the New workflow file input), pass it through so the backend
+        // wizard can mention/use the same filename.
+        pipeline_name: (result as any)?.pipeline_name,
       };
 
       const res = await api.askYamlWizard({
@@ -352,6 +383,86 @@ export default function ConfigurePage() {
         <div className="grid gap-6 lg:grid-cols-2">
           {/* ===== Left: Config form ===== */}
           <section className="space-y-6 rounded-2xl border border-white/20 bg-white/10 backdrop-blur-md shadow-glass p-6 text-white">
+            {/* Existing workflows selector (read-only YAML import) */}
+            <label className="grid gap-1">
+              <span className="text-sm font-medium text-white">Existing workflows</span>
+              <select
+                disabled={!repo || workflows.length === 0}
+                value={selectedWorkflowPath ?? ""}
+                onChange={(e) => {
+                  const path = e.target.value;
+                  if (!path || !repo) return;
+                  selectWorkflow(repo, path);
+                }}
+                className="rounded-md border border-white/25 bg-white px-3 py-2 text-sm text-slate-900 placeholder-slate-500"
+              >
+                <option value="">
+                  {workflows.length === 0
+                    ? "No workflows found in .github/workflows"
+                    : "Select an existing workflow (optional)"}
+                </option>
+                {workflows.map((wf) => {
+                  const shortPath = wf.path.startsWith(".github/workflows/")
+                    ? wf.path.replace(".github/workflows/", "")
+                    : wf.path;
+                  const state = wf.state === "active" ? "active" : wf.state;
+                  return (
+                    <option key={wf.path} value={wf.path}>
+                      {shortPath} {state ? `(${state})` : ""}
+                    </option>
+                  );
+                })}
+              </select>
+              <span className="text-xs text-slate-200">
+                Loading a workflow here updates the YAML preview below but does
+                not change the template or form fields.
+              </span>
+            </label>
+
+            {/* New workflow file name (for repos without existing YAML) */}
+            <label className="grid gap-1">
+              <span className="text-sm font-medium text-white">New workflow file</span>
+              <div className="flex items-center gap-2">
+                {(() => {
+                  const pipelineName = (result as any)?.pipeline_name as
+                    | string
+                    | undefined;
+                  const base = (pipelineName || "ci.yml").replace(/\.ya?ml$/i, "");
+                  return (
+                    <input
+                      type="text"
+                      disabled={busy}
+                      value={base}
+                      onChange={(e) => {
+                        const raw = e.target.value || "";
+                        let norm = raw.toLowerCase();
+                        norm = norm.replace(/\s+/g, "-");
+                        // remove characters that are likely to cause issues
+                        norm = norm.replace(/[^a-z0-9._-]/g, "");
+                        if (norm.length > 50) norm = norm.slice(0, 50);
+                        if (!norm) norm = "ci";
+                        const finalName = `${norm}.yml`;
+                        setPipelineName(finalName);
+                      }}
+                      className="flex-1 rounded-md border border-white/25 bg-white px-3 py-2 text-sm font-mono text-slate-900 placeholder-slate-500"
+                      placeholder="ci"
+                    />
+                  );
+                })()}
+                <span className="text-xs font-mono text-slate-200">.yml</span>
+              </div>
+              <span className="text-xs text-slate-200">
+                Will be committed as
+                {" "}
+                <span className="font-mono">
+                  {`.github/workflows/${
+                    ((result as any)?.pipeline_name as string | undefined) || 'ci.yml'
+                  }`}
+                </span>
+                .
+              </span>
+            </label>
+
             {/* Template */}
             <label className="grid gap-1">
               <span className="text-sm font-medium text-white">Template</span>
@@ -650,89 +761,110 @@ export default function ConfigurePage() {
               <button
                 type="button"
                 className="rounded-full border border-white/25 bg-white/5 px-2 py-0.5 hover:bg-white/10"
-                onClick={() => {
-                  setChatInput("Propose a complete GitHub Actions CI pipeline for this repo.");
-                  setTimeout(() => handleSendChat(), 0);
-                }}
+                onClick={handleProposePipeline}
               >
                 Propose CI pipeline
               </button>
             </div>
 
-            <div className="flex-1 min-h-[260px] overflow-y-auto rounded-md border border-white/20 bg-white/5 px-3 py-2 space-y-2">
-              {chatMessages.map((m, idx) => (
-                <div
-                  key={idx}
-                  className={`flex ${
-                    m.role === "user" ? "justify-end" : "justify-start"
-                  }`}
-                >
-                  <div className="max-w-[80%] space-y-1">
+            {/* Compact read-only output for regular users */}
+            {!isPro && (
+              <div className="mb-3 rounded-md border border-white/20 bg-white/5 px-3 py-2 text-[11px] text-slate-100 whitespace-pre-wrap max-h-56 overflow-y-auto">
+                {chatLoading ? (
+                  <span>Analyzing your workflows…</span>
+                ) : (
+                  (() => {
+                    const lastAssistant = [...chatMessages]
+                      .reverse()
+                      .find((m) => m.role === "assistant");
+                    return lastAssistant?.content ||
+                      "Click Analyze workflows to see a summary of your existing GitHub Actions files.";
+                  })()
+                )}
+              </div>
+            )}
+
+            {/* Chat transcript (Pro only). Regular users only see the
+                canned quick actions above, which trigger specific
+                analyze/suggest behaviours. */}
+            {isPro && (
+              <>
+                <div className="flex-1 min-h-[260px] overflow-y-auto rounded-md border border-white/20 bg-white/5 px-3 py-2 space-y-2">
+                  {chatMessages.map((m, idx) => (
                     <div
-                      className={`rounded-lg px-3 py-2 text-xs whitespace-pre-wrap ${
-                        m.role === "user"
-                          ? "bg-white/20 text-white border border-white/30"
-                          : "bg-white text-slate-900 border border-slate-200"
+                      key={idx}
+                      className={`flex ${
+                        m.role === "user" ? "justify-end" : "justify-start"
                       }`}
                     >
-                      {m.content}
-                    </div>
-                    {m.role === "assistant" && m.meta?.usedRag && (
-                      <div className="text-[10px] text-emerald-200">
-                        Used repo-aware RAG context (Pro)
-                      </div>
-                    )}
-                    {m.role === "assistant" &&
-                      Array.isArray(m.suggestions) &&
-                      m.suggestions.length > 0 && (
-                        <div className="ml-1 text-[11px] text-slate-900 bg-white/90 rounded-md px-2 py-1">
-                          <div className="mb-1 font-semibold">
-                            {m.meta?.noWorkflowContext
-                              ? "Generic best-practice suggestions:"
-                              : "Suggested workflow improvements:"}
-                          </div>
-                          <ul className="list-disc pl-4">
-                            {m.suggestions.map((s) => (
-                              <li key={s.id} className="mb-0.5 last:mb-0">
-                                <span className="font-semibold">{s.title}: </span>
-                                <span>{s.description}</span>
-                              </li>
-                            ))}
-                          </ul>
+                      <div className="max-w-[80%] space-y-1">
+                        <div
+                          className={`rounded-lg px-3 py-2 text-xs whitespace-pre-wrap ${
+                            m.role === "user"
+                              ? "bg-white/20 text-white border border-white/30"
+                              : "bg-white text-slate-900 border border-slate-200"
+                          }`}
+                        >
+                          {m.content}
                         </div>
-                      )}
+                        {m.role === "assistant" && m.meta?.usedRag && (
+                          <div className="text-[10px] text-emerald-200">
+                            Used repo-aware RAG context (Pro)
+                          </div>
+                        )}
+                        {m.role === "assistant" &&
+                          Array.isArray(m.suggestions) &&
+                          m.suggestions.length > 0 && (
+                            <div className="ml-1 text-[11px] text-slate-900 bg-white/90 rounded-md px-2 py-1">
+                              <div className="mb-1 font-semibold">
+                                {m.meta?.noWorkflowContext
+                                  ? "Generic best-practice suggestions:"
+                                  : "Suggested workflow improvements:"}
+                              </div>
+                              <ul className="list-disc pl-4">
+                                {m.suggestions.map((s) => (
+                                  <li key={s.id} className="mb-0.5 last:mb-0">
+                                    <span className="font-semibold">{s.title}: </span>
+                                    <span>{s.description}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                      </div>
+                    </div>
+                  ))}
+                  {chatLoading && (
+                    <p className="text-[11px] text-slate-200">
+                      Thinking about your pipeline…
+                    </p>
+                  )}
+                </div>
+
+                {/* Free-form chat input (Pro only) */}
+                <div className="mt-3 space-y-2">
+                  <textarea
+                    className="w-full rounded-md border border-white/25 bg-white/10 text-white px-3 py-2 text-xs resize-none placeholder-white/60"
+                    rows={3}
+                    placeholder="E.g. I want this to run only on main and PRs, use Node 20, cache npm, and deploy to prod on tags starting with v*…"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={handleChatKeyDown}
+                    disabled={chatLoading}
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={handleSendChat}
+                      disabled={chatLoading || !chatInput.trim()}
+                      className="rounded-md bg-white/20 hover:bg-white/30 px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {chatLoading ? "Asking…" : "Ask wizard"}
+                    </button>
                   </div>
                 </div>
-              ))}
-              {chatLoading && (
-                <p className="text-[11px] text-slate-200">
-                  Thinking about your pipeline…
-                </p>
-              )}
-            </div>
-
-            {/* Chat input */}
-            <div className="mt-3 space-y-2">
-              <textarea
-                className="w-full rounded-md border border-white/25 bg-white/10 text-white px-3 py-2 text-xs resize-none placeholder-white/60"
-                rows={3}
-                placeholder="E.g. I want this to run only on main and PRs, use Node 20, cache npm, and deploy to prod on tags starting with v*…"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={handleChatKeyDown}
-                disabled={chatLoading}
-              />
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={handleSendChat}
-                  disabled={chatLoading || !chatInput.trim()}
-                  className="rounded-md bg-white/20 hover:bg-white/30 px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {chatLoading ? "Asking…" : "Ask wizard"}
-                </button>
-              </div>
-            </div>
+              </>
+            )}
           </section>
         </div>
 

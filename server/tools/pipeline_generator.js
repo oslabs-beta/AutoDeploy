@@ -244,17 +244,24 @@ ${jobs.join("\n")}
       const jobs = [];
 
       if (resolvedStages.includes("build")) {
+        // Indent the runtime setup step correctly inside the steps list so
+        // that the generated YAML is valid. We embed full, pre-indented
+        // lines here instead of trying to rely on template indentation.
         let runtimeSetupStep = "";
         if (template === "node_app") {
-          runtimeSetupStep = `- name: Setup Node.js
-    uses: actions/setup-node@v4
-    with:
-      node-version: ${normalized.nodeVersion ?? "20"}`;
+          runtimeSetupStep = [
+            "      - name: Setup Node.js",
+            "        uses: actions/setup-node@v4",
+            "        with:",
+            `          node-version: ${normalized.nodeVersion ?? "20"}`,
+          ].join("\n");
         } else if (template === "python_app") {
-          runtimeSetupStep = `- name: Setup Python
-    uses: actions/setup-python@v5
-    with:
-      python-version: "3.x"`;
+          runtimeSetupStep = [
+            "      - name: Setup Python",
+            "        uses: actions/setup-python@v5",
+            "        with:",
+            '          python-version: "3.x"',
+          ].join("\n");
         }
 
         jobs.push(`
@@ -262,8 +269,8 @@ ${jobs.join("\n")}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      ${runtimeSetupStep}
-      - name: Install Dependencies
+${runtimeSetupStep ? `${runtimeSetupStep}
+` : ""}      - name: Install Dependencies
         run: ${
           normalized.installCmd ??
           (template === "node_app" ? "npm ci" : "pip install -r requirements.txt")
