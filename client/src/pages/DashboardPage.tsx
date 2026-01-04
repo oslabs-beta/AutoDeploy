@@ -1,14 +1,14 @@
-import { useEffect, useState } from "react";
-import { useRepoStore } from "../store/useRepoStore";
-import { usePipelineStore } from "../store/usePipelineStore";
-import { useConfigStore } from "../store/useConfigStore";
-import { useDeployStore } from "../store/useDeployStore";
-import { api, PipelineVersion } from "../lib/api";
+import { useEffect, useState } from 'react';
+import { useRepoStore } from '../store/useRepoStore';
+import { usePipelineStore } from '../store/usePipelineStore';
+import { useConfigStore } from '../store/useConfigStore';
+import { useDeployStore } from '../store/useDeployStore';
+import { api, PipelineVersion } from '../lib/api';
 
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
-import { Button } from "@/components/ui/Button";
-import { Badge } from "@/components/ui/Badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
+import { Badge } from '@/components/ui/Badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 function formatDate(iso: string) {
   try {
@@ -20,7 +20,7 @@ function formatDate(iso: string) {
 
 export default function DashboardPage() {
   const { repo, branch: selectedBranch } = useRepoStore();
-  const { result, setResultYaml } = usePipelineStore();
+  const { result, setResultYaml, provider } = usePipelineStore();
   const cfg = useConfigStore();
 
   const running = useDeployStore((s) => s.running);
@@ -35,13 +35,12 @@ export default function DashboardPage() {
     };
   }, [clear]);
 
-  const repoFullName = result?.repo || repo || "";
-  const branchName =
-    (result as any)?.branch || selectedBranch || "main";
-  const environment = cfg.env || "dev";
+  const repoFullName = result?.repo || repo || '';
+  const branchName = (result as any)?.branch || selectedBranch || 'main';
+  const environment = cfg.env || 'dev';
   const workflowFile =
     (result as any)?.pipeline_name || `${environment}-deploy.yml`;
-  const workflowPath = workflowFile.startsWith(".github/workflows/")
+  const workflowPath = workflowFile.startsWith('.github/workflows/')
     ? workflowFile
     : `.github/workflows/${workflowFile}`;
 
@@ -53,17 +52,24 @@ export default function DashboardPage() {
   const [rollbackBusy, setRollbackBusy] = useState(false);
 
   const [editingYaml, setEditingYaml] = useState(false);
-  const [draftYaml, setDraftYaml] = useState(result?.generated_yaml ?? "");
-  const currentYaml = (result?.generated_yaml ?? draftYaml ?? "").trim();
+  const [draftYaml, setDraftYaml] = useState(result?.generated_yaml ?? '');
+  const currentYaml = (result?.generated_yaml ?? draftYaml ?? '').trim();
   const canCommitYaml = currentYaml.length > 0;
+
+  // Added by Lorenc
   // 🔑 Single source of truth for the currently active YAML
+
+  // Dockerfile/.dockerignore scaffolding via scaffoldCommitRouter
+  const [scaffoldBusy, setScaffoldBusy] = useState(false);
+  const [hasDockerfiles, setHasDockerfiles] = useState<boolean | null>(null);
+  const [checkingDockerfiles, setCheckingDockerfiles] = useState(false);
 
 // const canCommitYaml =
 //   (editingYaml ? draftYaml : (result?.generated_yaml ?? draftYaml))?.trim();
 
   useEffect(() => {
     if (!editingYaml) {
-      setDraftYaml(result?.generated_yaml ?? "");
+      setDraftYaml(result?.generated_yaml ?? '');
     }
   }, [result?.generated_yaml, editingYaml]);
 
@@ -89,8 +95,9 @@ export default function DashboardPage() {
           }
         }
       } catch (err: any) {
-        console.error("[Dashboard] getPipelineHistory failed:", err);
-        if (!cancelled) setHistoryError(err.message || "Failed to load history");
+        console.error('[Dashboard] getPipelineHistory failed:', err);
+        if (!cancelled)
+          setHistoryError(err.message || 'Failed to load history');
       } finally {
         if (!cancelled) setLoadingHistory(false);
       }
@@ -103,77 +110,136 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoFullName, branchName, workflowPath]);
 
-async function handleRollback(version: PipelineVersion) {
-  if (!version?.id) return;
+  // Check whether the selected repo already has Dockerfiles
+  useEffect(() => {
+    if (!repoFullName) {
+      setHasDockerfiles(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        setCheckingDockerfiles(true);
+        const has = await api.repoHasDockerfiles(repoFullName);
+        if (!cancelled) setHasDockerfiles(has);
+      } catch (e) {
+        console.error("[Dashboard] repoHasDockerfiles failed:", e);
+        if (!cancelled) setHasDockerfiles(false);
+      } finally {
+        if (!cancelled) setCheckingDockerfiles(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [repoFullName]);
 
-  const confirmMsg = `Rollback ${repoFullName}@${branchName} to version created at ${formatDate(
-    version.created_at
-  )}?`;
-  if (!window.confirm(confirmMsg)) return;
+  async function handleRollback(version: PipelineVersion) {
+    if (!version?.id) return;
 
-  setRollbackBusy(true);
-  try {
-    // 👇 THIS is where the rollback happens
-    const data = await api.rollbackPipeline(version.id);
+    const confirmMsg = `Rollback ${repoFullName}@${branchName} to version created at ${formatDate(
+      version.created_at
+    )}?`;
+    if (!window.confirm(confirmMsg)) return;
 
-    // 👇 SHOW REAL OUTPUT (GitHub commit URL)
-    alert(
-      `Rollback committed ✅\n${
-        data?.github?.commit?.html_url ?? "OK"
-      }`
-    );
+    setRollbackBusy(true);
+    try {
+      // 👇 THIS is where the rollback happens
+      const data = await api.rollbackPipeline(version.id);
 
-    // 👇 Update Current Pipeline YAML in UI
-    setResultYaml(version.yaml);
-    setEditingYaml(false);
+      // 👇 SHOW REAL OUTPUT (GitHub commit URL)
+      alert(`Rollback committed ✅\n${data?.github?.commit?.html_url ?? 'OK'}`);
 
-    // 👇 Refresh history list
-    const rows = await api.getPipelineHistory({
-      repoFullName,
-      branch: branchName,
-      path: workflowPath,
-      limit: 20,
-    });
-    setVersions(rows);
-    setSelectedVersion(rows[0] ?? null);
+      // 👇 Update Current Pipeline YAML in UI
+      setResultYaml(version.yaml);
+      setEditingYaml(false);
 
-  } catch (err: any) {
-    console.error("[Dashboard] rollbackPipeline failed:", err);
-    alert(err.message || "Rollback failed");
-  } finally {
-    setRollbackBusy(false);
+      // 👇 Refresh history list
+      const rows = await api.getPipelineHistory({
+        repoFullName,
+        branch: branchName,
+        path: workflowPath,
+        limit: 20,
+      });
+      setVersions(rows);
+      setSelectedVersion(rows[0] ?? null);
+    } catch (err: any) {
+      console.error('[Dashboard] rollbackPipeline failed:', err);
+      alert(err.message || 'Rollback failed');
+    } finally {
+      setRollbackBusy(false);
+    }
   }
-}
 
+  async function handleCommitClick() {
+    const repoFullNameLocal = result?.repo || repo;
+    const yaml = currentYaml;
 
+    const branchLocal = (result as any)?.branch || branchName || 'main';
+    const providerLocal = provider || 'aws';
+    const path = workflowPath;
 
-async function handleCommitClick() {
-  const repoFullNameLocal = result?.repo || repo;
-  const yaml = currentYaml;
+    if (!repoFullNameLocal || !yaml) {
+      alert('Missing repo or YAML — generate a pipeline first.');
+      return;
+    }
 
-  const branchLocal = (result as any)?.branch || branchName || "main";
-  const provider = "aws";
-  const path = workflowPath;
+    const res = await startDeploy({
+      repoFullName: repoFullNameLocal,
+      branch: branchLocal,
+      env: environment,
+      yaml,
+      provider: providerLocal,
+      path,
+    });
 
-  if (!repoFullNameLocal || !yaml) {
-    alert("Missing repo or YAML — generate a pipeline first.");
+    // backend response you showed: res.data.commit.html_url
+    const url = res?.data?.commit?.html_url;
+    alert(url ? `Committed ✅\n${url}` : 'Committed ✅');
+  }
+
+async function handleScaffoldRepo() {
+  if (!repoFullName) {
+    alert("Pick a GitHub repo on the Connect page first.");
     return;
   }
 
-  const res = await startDeploy({
-    repoFullName: repoFullNameLocal,
-    branch: branchLocal,
-    env: environment,
-    yaml,
-    provider,
-    path,
-  });
+  // Defensive guard in case the disabled state ever desyncs
+  if (hasDockerfiles) {
+    alert("Dockerfiles already exist in this repo; generation is disabled.");
+    return;
+  }
 
-  // backend response you showed: res.data.commit.html_url
-  const url = res?.data?.commit?.html_url;
-  alert(url ? `Committed ✅\n${url}` : "Committed ✅");
-}
+  const branch = branchName || "main";
 
+    try {
+      setScaffoldBusy(true);
+
+      const res = await api.scaffoldRepoFiles({
+        repoFullName,
+        branch,
+        backendPath: "server",
+        frontendPath: "client",
+      });
+
+      const summary = (res.committed || [])
+        .map(
+          (c: { path: string; commitSha: string | null }) =>
+            `${c.path} (${c.commitSha || 'no sha'})`
+        )
+        .join('\n');
+
+      alert(
+        `Scaffolded Dockerfiles/.dockerignore into ${res.repo} @ ${res.branch}.` +
+          (summary ? `\n\nFiles:\n${summary}` : '')
+      );
+    } catch (err: any) {
+      console.error('[Dashboard] scaffoldRepoFiles failed:', err);
+      alert(err?.message || 'Failed to scaffold Dockerfiles');
+    } finally {
+      setScaffoldBusy(false);
+    }
+  }
 
   return (
     <div className="p-6 space-y-4 max-w-6xl mx-auto">
@@ -182,7 +248,7 @@ async function handleCommitClick() {
           <h1 className="text-2xl font-semibold">Pipeline Dashboard</h1>
           {repoFullName ? (
             <p className="text-sm text-muted-foreground">
-                  {repoFullName} @ <span className="font-mono">{branchName}</span>
+              {repoFullName} @ <span className="font-mono">{branchName}</span>
             </p>
           ) : (
             <p className="text-sm text-orange-600">
@@ -200,10 +266,10 @@ async function handleCommitClick() {
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Current Pipeline</CardTitle>
               <div className="text-xs text-muted-foreground">
-                {result?.pipeline_name || "No pipeline name"} · Generated{" "}
+                {result?.pipeline_name || 'No pipeline name'} · Generated{' '}
                 {result?.created_at
                   ? new Date(result.created_at).toLocaleString()
-                  : "—"}
+                  : '—'}
               </div>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
@@ -218,52 +284,94 @@ async function handleCommitClick() {
                 <ScrollArea className="h-64 rounded-md border bg-slate-950 text-xs font-mono text-slate-100">
                   <div className="p-3">
                     <pre className="whitespace-pre-wrap break-words">
-                      {currentYaml || "No pipeline generated yet."}
-
+                      {currentYaml || 'No pipeline generated yet.'}
                     </pre>
                   </div>
                 </ScrollArea>
               )}
-                
-              <div className="flex items-center gap-2 flex-wrap">
-                <Button
-  size="sm"
-  disabled={running || !repoFullName || !canCommitYaml}
-  onClick={handleCommitClick}
->
-  {running ? "Committing…" : "Commit to GitHub and Deploy to Cloud"}
-</Button>
 
-
-                {running && (
-                  <Button size="sm" variant="outline" onClick={stop}>
-                    Stop
+              <div className="flex items-center gap-4 flex-wrap">
+                {/* Step 1: generate Dockerfiles */}
+                <div className="flex flex-col gap-1">
+                  <span className="text-[11px] font-medium text-muted-foreground">
+                    Step 1 – Generate Dockerfiles (server/ + client/)
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={
+                      scaffoldBusy ||
+                      !repoFullName ||
+                      checkingDockerfiles ||
+                      !!hasDockerfiles
+                    }
+                    onClick={handleScaffoldRepo}
+                  >
+                    {scaffoldBusy || checkingDockerfiles
+                      ? "Scaffolding Dockerfiles…"
+                      : "Generate Dockerfiles for server/ + client/"}
                   </Button>
-                )}
-                {currentYaml && (
-                  <>
+                </div>
+
+                {/* Step 2: commit workflow and deploy */}
+                <div className="flex flex-col gap-1">
+                  <span className="text-[11px] font-medium text-muted-foreground">
+                    Step 2 – Commit workflow & deploy
+                  </span>
+                  <div className="flex items-center gap-2 flex-wrap">
                     <Button
                       size="sm"
-                      variant={editingYaml ? "secondary" : "outline"}
-                      onClick={() => setEditingYaml((v) => !v)}
+                      disabled={running || !repoFullName || !canCommitYaml}
+                      onClick={handleCommitClick}
                     >
-                      {editingYaml ? "Cancel edit" : "Edit YAML"}
+                      {running
+                        ? 'Committing…'
+                        : 'Commit to GitHub and Deploy to Cloud'}
                     </Button>
-                    {editingYaml && (
-                      <Button
-                        size="sm"
-                        variant="default"
-                        onClick={() => {
-                          setResultYaml(draftYaml);
-                          setEditingYaml(false);
-                        }}
-                      >
-                        Save YAML
+
+                    {running && (
+                      <Button size="sm" variant="outline" onClick={stop}>
+                        Stop
                       </Button>
                     )}
-                  </>
-                )}
+                    {currentYaml && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant={editingYaml ? 'secondary' : 'outline'}
+                          onClick={() => setEditingYaml((v) => !v)}
+                        >
+                          {editingYaml ? 'Cancel edit' : 'Edit YAML'}
+                        </Button>
+                        {editingYaml && (
+                          <Button
+                            size="sm"
+                            variant="default"
+                            onClick={() => {
+                              setResultYaml(draftYaml);
+                              setEditingYaml(false);
+                            }}
+                          >
+                            Save YAML
+                          </Button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
+
+              {!repoFullName ? (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Pick a GitHub repo on the Connect / Configure pages before
+                  generating Dockerfiles into server/ and client/.
+                </p>
+              ) : hasDockerfiles ? (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Dockerfiles already exist in this repo; generation into server/
+                  and client/ is disabled.
+                </p>
+              ) : null}
             </CardContent>
           </Card>
 
@@ -276,10 +384,10 @@ async function handleCommitClick() {
               <ScrollArea className="h-64 rounded-md border bg-slate-950 text-slate-100 text-xs font-mono">
                 <div className="p-3 space-y-1">
                   {events.length === 0
-                    ? "No logs yet."
+                    ? 'No logs yet.'
                     : events.map((e, i) => (
                         <div key={i}>
-                          [{new Date(e.ts).toLocaleTimeString()}]{" "}
+                          [{new Date(e.ts).toLocaleTimeString()}]{' '}
                           {e.level.toUpperCase()}: {e.msg}
                         </div>
                       ))}
@@ -300,7 +408,9 @@ async function handleCommitClick() {
             </CardHeader>
             <CardContent className="flex flex-col">
               {loadingHistory && (
-                <p className="text-sm text-muted-foreground">Loading history…</p>
+                <p className="text-sm text-muted-foreground">
+                  Loading history…
+                </p>
               )}
               {historyError && (
                 <p className="text-sm text-red-600">{historyError}</p>
@@ -321,12 +431,12 @@ async function handleCommitClick() {
                         type="button"
                         onClick={() => setSelectedVersion(v)}
                         className={[
-                          "w-full text-left px-3 py-2 rounded-md border flex flex-col gap-1",
-                          "transition-colors",
+                          'w-full text-left px-3 py-2 rounded-md border flex flex-col gap-1',
+                          'transition-colors',
                           isSelected
-                            ? "border-primary bg-primary/5"
-                            : "border-border hover:bg-muted",
-                        ].join(" ")}
+                            ? 'border-primary bg-primary/5'
+                            : 'border-border hover:bg-muted',
+                        ].join(' ')}
                       >
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-xs font-medium truncate">
@@ -334,9 +444,9 @@ async function handleCommitClick() {
                           </span>
                           <Badge
                             variant={
-                              v.source === "pipeline_rollback"
-                                ? "outline"
-                                : "secondary"
+                              v.source === 'pipeline_rollback'
+                                ? 'outline'
+                                : 'secondary'
                             }
                           >
                             {v.source}
@@ -365,7 +475,7 @@ async function handleCommitClick() {
                 <CardTitle className="text-base">Selected Version</CardTitle>
                 {selectedVersion && (
                   <p className="text-xs text-muted-foreground">
-                    Created: {formatDate(selectedVersion.created_at)} ·{" "}
+                    Created: {formatDate(selectedVersion.created_at)} ·{' '}
                     <span className="font-mono">
                       {(selectedVersion.yaml_hash || selectedVersion.id).slice(
                         0,
@@ -382,7 +492,7 @@ async function handleCommitClick() {
                   disabled={rollbackBusy}
                   onClick={() => handleRollback(selectedVersion)}
                 >
-                  {rollbackBusy ? "Rolling back…" : "Rollback to this version"}
+                  {rollbackBusy ? 'Rolling back…' : 'Rollback to this version'}
                 </Button>
               )}
             </CardHeader>
@@ -408,4 +518,3 @@ async function handleCommitClick() {
     </div>
   );
 }
-

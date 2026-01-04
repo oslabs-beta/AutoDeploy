@@ -13,10 +13,36 @@ type PipelineState = {
     installCmd: string;
     testCmd: string;
     buildCmd: string;
+
+    // AWS
     awsRoleArn?: string;
     awsSessionName?: string;
     awsRegion?: string;
+
+    // GCP (Cloud Run via gcp_adapter)
+    gcpProjectId?: string;
+    gcpRegion?: string;
+    gcpWorkloadIdentityProvider?: string;
     gcpServiceAccountEmail?: string;
+
+    gcpBackendService?: string;
+    gcpFrontendService?: string;
+
+    gcpBackendArRepo?: string;
+    gcpFrontendArRepo?: string;
+
+    gcpBackendImageName?: string;
+    gcpFrontendImageName?: string;
+
+    gcpBackendContext?: string;
+    gcpBackendDockerfile?: string;
+    gcpFrontendContext?: string;
+    gcpFrontendDockerfile?: string;
+
+    gcpBackendPort?: number;
+    gcpFrontendPort?: number;
+
+    gcpGenerateDockerfiles?: boolean;
   };
   provider: 'aws' | 'gcp' | 'jenkins';
 
@@ -72,27 +98,100 @@ const TEMPLATE_DEFAULT_OPTIONS: Record<string, PipelineState['options']> = {
     installCmd: 'npm ci',
     testCmd: 'npm test',
     buildCmd: 'npm run build',
+
     awsSessionName: 'autodeploy',
     awsRegion: 'us-east-1',
+
+    // GCP defaults (leave blank to use GitHub Actions secrets via gcp_adapter defaults)
+    gcpProjectId: '',
+    gcpRegion: '',
+    gcpWorkloadIdentityProvider: '',
     gcpServiceAccountEmail: '',
+
+    gcpBackendService: 'my-app-api',
+    gcpFrontendService: 'my-app-web',
+
+    gcpBackendArRepo: 'autodeploy',
+    gcpFrontendArRepo: 'autodeploy',
+
+    gcpBackendImageName: 'my-app-api',
+    gcpFrontendImageName: 'my-app-web',
+
+    gcpBackendContext: 'server',
+    gcpBackendDockerfile: 'server/Dockerfile',
+    gcpFrontendContext: 'client',
+    gcpFrontendDockerfile: 'client/Dockerfile',
+
+    gcpBackendPort: 8080,
+    gcpFrontendPort: 8080,
+
+    gcpGenerateDockerfiles: false,
   },
   python_app: {
     nodeVersion: '',
     installCmd: 'pip install -r requirements.txt',
     testCmd: 'pytest',
     buildCmd: '',
+
     awsSessionName: 'autodeploy',
     awsRegion: 'us-east-1',
+
+    gcpProjectId: '',
+    gcpRegion: '',
+    gcpWorkloadIdentityProvider: '',
     gcpServiceAccountEmail: '',
+
+    gcpBackendService: 'my-app-api',
+    gcpFrontendService: 'my-app-web',
+
+    gcpBackendArRepo: 'autodeploy',
+    gcpFrontendArRepo: 'autodeploy',
+
+    gcpBackendImageName: 'my-app-api',
+    gcpFrontendImageName: 'my-app-web',
+
+    gcpBackendContext: 'server',
+    gcpBackendDockerfile: 'server/Dockerfile',
+    gcpFrontendContext: 'client',
+    gcpFrontendDockerfile: 'client/Dockerfile',
+
+    gcpBackendPort: 8080,
+    gcpFrontendPort: 8080,
+
+    gcpGenerateDockerfiles: false,
   },
   container_service: {
     nodeVersion: '',
     installCmd: '',
     testCmd: '',
     buildCmd: '',
+
     awsSessionName: 'autodeploy',
     awsRegion: 'us-east-1',
+
+    gcpProjectId: '',
+    gcpRegion: '',
+    gcpWorkloadIdentityProvider: '',
     gcpServiceAccountEmail: '',
+
+    gcpBackendService: 'my-app-api',
+    gcpFrontendService: 'my-app-web',
+
+    gcpBackendArRepo: 'autodeploy',
+    gcpFrontendArRepo: 'autodeploy',
+
+    gcpBackendImageName: 'my-app-api',
+    gcpFrontendImageName: 'my-app-web',
+
+    gcpBackendContext: 'server',
+    gcpBackendDockerfile: 'server/Dockerfile',
+    gcpFrontendContext: 'client',
+    gcpFrontendDockerfile: 'client/Dockerfile',
+
+    gcpBackendPort: 8080,
+    gcpFrontendPort: 8080,
+
+    gcpGenerateDockerfiles: false,
   },
 };
 
@@ -104,9 +203,33 @@ const initial: PipelineState = {
     installCmd: 'npm ci',
     testCmd: 'npm test',
     buildCmd: 'npm run build',
+
     awsSessionName: 'autodeploy',
     awsRegion: 'us-east-1',
+
+    gcpProjectId: '',
+    gcpRegion: '',
+    gcpWorkloadIdentityProvider: '',
     gcpServiceAccountEmail: '',
+
+    gcpBackendService: 'my-app-api',
+    gcpFrontendService: 'my-app-web',
+
+    gcpBackendArRepo: 'autodeploy',
+    gcpFrontendArRepo: 'autodeploy',
+
+    gcpBackendImageName: 'my-app-api',
+    gcpFrontendImageName: 'my-app-web',
+
+    gcpBackendContext: 'server',
+    gcpBackendDockerfile: 'server/Dockerfile',
+    gcpFrontendContext: 'client',
+    gcpFrontendDockerfile: 'client/Dockerfile',
+
+    gcpBackendPort: 8080,
+    gcpFrontendPort: 8080,
+
+    gcpGenerateDockerfiles: false,
   },
   provider: 'aws',
   roles: [],
@@ -124,10 +247,35 @@ export const usePipelineStore = create<PipelineState & PipelineActions>()(
     setTemplate: (t) => {
       const current = get();
       const preservedProviderFields = {
+        // AWS
         awsRoleArn: current.options.awsRoleArn,
         awsSessionName: current.options.awsSessionName,
         awsRegion: current.options.awsRegion,
+
+        // GCP
+        gcpProjectId: current.options.gcpProjectId,
+        gcpRegion: current.options.gcpRegion,
+        gcpWorkloadIdentityProvider: current.options.gcpWorkloadIdentityProvider,
         gcpServiceAccountEmail: current.options.gcpServiceAccountEmail,
+
+        gcpBackendService: current.options.gcpBackendService,
+        gcpFrontendService: current.options.gcpFrontendService,
+
+        gcpBackendArRepo: current.options.gcpBackendArRepo,
+        gcpFrontendArRepo: current.options.gcpFrontendArRepo,
+
+        gcpBackendImageName: current.options.gcpBackendImageName,
+        gcpFrontendImageName: current.options.gcpFrontendImageName,
+
+        gcpBackendContext: current.options.gcpBackendContext,
+        gcpBackendDockerfile: current.options.gcpBackendDockerfile,
+        gcpFrontendContext: current.options.gcpFrontendContext,
+        gcpFrontendDockerfile: current.options.gcpFrontendDockerfile,
+
+        gcpBackendPort: current.options.gcpBackendPort,
+        gcpFrontendPort: current.options.gcpFrontendPort,
+
+        gcpGenerateDockerfiles: current.options.gcpGenerateDockerfiles,
       };
 
       const nextDefaults =
