@@ -34,8 +34,10 @@ export const useDeployStore = create<DeployState & DeployActions>()((set) => ({
       console.log({ repoFullName, branch, env, provider, path, yamlLength: yaml ? yaml.length : 0 });
       console.groupEnd();
       const { jobId } = await api.startDeploy({ repoFullName, branch, env, yaml, provider, path });
-      const stop = api.streamJob(jobId, (e) =>
-        set((s) => ({ events: [...s.events, e] }))
+      const stop = api.streamJob(
+        jobId,
+        (e) => set((s) => ({ events: [...s.events, e] })),
+        () => set({ running: false, stopStream: undefined }),
       );
       set({ jobId, stopStream: stop });
     } catch (err) {

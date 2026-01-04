@@ -1,14 +1,17 @@
 # AutoDeploy
 
-Auto-Generated Secure CI/CD Pipelines with AI + MCP.
+Auto-generated secure CI/CD pipelines with AI + MCP.
 
-AutoDeploy is a full‑stack project that helps you analyze repositories, generate CI/CD workflows, and safely track and roll back deployments using an AI‑assisted MCP (Model Context Protocol) backend and a React wizard frontend.
-
----
+AutoDeploy is a full-stack monorepo that:
+- connects to GitHub (OAuth)
+- analyzes repositories
+- generates GitHub Actions workflows (AWS/GCP)
+- commits workflows to repos
+- tracks deployments and supports rollback
 
 ## Table of Contents
-
 - [Features](#features)
+- [Tech Stack](#tech-stack)
 - [Architecture](#architecture)
   - [Backend](#backend)
   - [MCP tools](#mcp-tools)
@@ -16,148 +19,140 @@ AutoDeploy is a full‑stack project that helps you analyze repositories, genera
 - [Getting Started](#getting-started)
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
-  - [Running the backend](#running-the-backend)
-  - [Running the frontend](#running-the-frontend)
-  - [Running the MCP mock core and agent](#running-the-mcp-mock-core-and-agent)
+  - [Run (backend)](#run-backend)
+  - [Run (frontend)](#run-frontend)
+  - [MCP mock core + agent (local)](#mcp-mock-core--agent-local)
 - [Environment Configuration](#environment-configuration)
+- [GCP (Cloud Run) Usage](#gcp-cloud-run-usage)
 - [Testing](#testing)
 - [Project Structure](#project-structure)
 - [License](#license)
 
----
-
 ## Features
-
-- GitHub OAuth integration to securely link a GitHub account and fetch repository information.
+- GitHub OAuth to securely link a GitHub account and discover repos/branches.
 - Repository analysis and CI/CD pipeline generation via MCP tools.
-- Pipeline commit, history, and rollback for GitHub Actions workflow YAMLs.
+- Commit, version history, and rollback for GitHub Actions workflow YAMLs.
 - Deployment logging with retry/rollback support and workflow dispatch APIs.
 - React + TypeScript wizard UI for configuring providers, templates, secrets, and deployments.
+
+## Tech Stack
+
+### Frontend
+- React + TypeScript
+- Vite
+- Tailwind CSS
+- Zustand (client state)
+
+### Backend
+- Node.js (ESM)
+- Express
+- Zod (tool input validation)
+- PostgreSQL (optionally via Supabase)
+
+### Integrations
+- GitHub OAuth
+- GitHub Actions (workflow generation + commit, history/rollback)
+- GCP Cloud Run + Artifact Registry (Workload Identity Federation / OIDC)
+- AWS OIDC (role discovery/selection)
 
 ## Architecture
 
 ### Backend
-
-The backend lives under `server/` and is an Express application (ESM) that exposes both REST and MCP‑style endpoints.
+The backend lives under `server/` and is an Express app (ESM) exposing REST endpoints and an MCP-style tool router.
 
 Key entry point:
-
 - `server/server.js` – bootstraps the Express app, middleware, and routes.
 
-Important route groups include:
-
-- `GET /health` – basic health check (used by the smoke test).
-- `GET /db/ping` – checks database connectivity via `healthCheck()` in `server/db.js`.
-- `/auth/github/*` – GitHub OAuth flow plus `/auth/github/me` inspection.
-- `/auth/local/*`, `/auth/google/*` – additional auth flows.
-- `/api/me` – session introspection (uses `requireSession`).
-- `/users`, `/connections` – basic user and connection CRUD backed by Postgres.
-- `/deployments/*` – deployment logs API, including retry, rollback, and workflow dispatch.
-- `/agent/*` – higher‑level "wizard" orchestration endpoints.
-- `/mcp/v1/*` – MCP tool façade (see below).
-- `/pipeline-sessions/*` – multi‑step pipeline wizard backed by Supabase tables.
-
-The backend expects a Postgres database (e.g., via a Supabase connection string) configured in `server/db.js`.
+Notable routes:
+- `GET /health` – basic health check (used by the smoke test)
+- `GET /db/ping` – database connectivity check (`server/db.js`)
+- `/auth/github/*` – GitHub OAuth flow
+- `/api/me` – session introspection (`requireSession`)
+- `/deployments/*` – deployment log APIs (retry/rollback/dispatch)
+- `/agent/*` – wizard orchestration endpoints
+- `/mcp/v1/*` – MCP tool façade
+- `/pipeline-sessions/*` – stateful wizard backed by Supabase tables
 
 ### MCP tools
-
-Internal MCP tools are registered in `server/tools/index.js` and exposed over HTTP through `server/routes/mcp.js` at `/mcp/v1/:tool_name`.
+Tools are registered in `server/tools/index.js` and exposed via `server/routes/mcp.js` at `/mcp/v1/:tool_name`.
 
 Notable tools:
+- `repo`, `repo_reader` – repository discovery and branch listing
+- `pipeline_generator` – synthesizes CI/CD workflow YAML
+- `oidc_adapter` – AWS OIDC role discovery/selection
+- `github_adapter` – GitHub automation (upsert files, workflow dispatch)
+- `gcp_adapter`, `scaffold_generator` – GCP workflow + Dockerfile scaffolding
 
-- `repo`, `repo_reader` → repository discovery and branch listing.
-- `pipeline_generator` → synthesizes CI/CD workflow YAML.
-- `oidc`, `oidc_adapter` → handles AWS OIDC roles and related configuration.
-- `github`, `github_adapter` → GitHub automation (e.g., file upserts, workflow dispatch).
-- `gcp`, `gcp_adapter`, `scaffold`, `scaffold_generator` → GCP‑specific workflow scaffolding.
-
-Each tool defines an `input_schema` (Zod) and a `handler` function. The `mcp` route:
-
-- Injects `user_id` and `github_username` from the current session.
-- Validates input using the tool’s schema.
-- Normalizes responses to `{ success: true/false, data | error }`.
+Each tool defines:
+- an `input_schema` (Zod)
+- a `handler` function
 
 ### Frontend
-
-The frontend lives under `client/` and is a React + TypeScript app built with Vite and Tailwind.
+The frontend lives under `client/` and is a React + TypeScript app built with Vite.
 
 Key elements:
-
-- Pages and routes in `client/src/pages` and `client/src/routes` implement the connect/login flow, configuration wizard, secrets management, Jenkins page, dashboard, and 404.
-- Zustand stores in `client/src/store` (e.g., `usePipelineStore`, `useWizardStore`, `useDeployStore`, `useAuthStore`) hold wizard selections, auth/session info, pipeline generation results, and deployment data.
-- `client/src/lib/api.ts` wraps REST and MCP calls, handles GitHub OAuth redirects, caches AWS roles and repo lists, and orchestrates pipeline commit and rollback.
-- UI components under `client/src/components` include shared primitives (`ui/`), layout and nav (`common/`), wizard steps (`wizard/`), and dashboard widgets (`dashboard/`).
-
-In development, the frontend talks to the backend through a Vite dev server proxy:
-
-- `BASE = import.meta.env.VITE_API_BASE || "/api"`
-- In dev, `BASE` is typically `/api`, which is proxied to the Express backend.
-- `SERVER_BASE` is derived from `BASE` for direct `/mcp/v1/*` and `/auth/*` calls.
+- pages/routes: `client/src/pages`, `client/src/routes`
+- state: Zustand stores in `client/src/store`
+- API layer: `client/src/lib/api.ts` (REST + `/mcp/v1/*` calls)
+- UI components: `client/src/components`
 
 ## Getting Started
 
 ### Prerequisites
-
-- Node.js and npm installed.
-- A Postgres database (e.g., Supabase) for the backend.
-- A GitHub OAuth app for GitHub integration.
+- Node.js + npm
+- Postgres (e.g., Supabase connection string)
+- GitHub OAuth app credentials
 
 ### Installation
-
-From the repo root, install backend dependencies:
-
-```bash
-npm install
-```
-
-Then install frontend dependencies:
-
-```bash
-cd client
-npm install
-```
-
-### Running the backend
-
 From the repo root:
 
 ```bash
-# Start backend in watch mode (Express + Nodemon)
-npm run dev
-
-# Start backend in production mode
-npm start
+npm install
 ```
 
-By default the server listens on `PORT` or `3000`.
-
-### Running the frontend
-
-From the `client/` directory:
+Frontend dependencies:
 
 ```bash
 cd client
+npm install
+```
+
+### Run (backend)
+From the repo root:
+
+```bash
+# watch mode (Express + Nodemon)
+npm run dev
+
+# production mode
+npm start
+```
+
+The backend listens on `PORT` (default `3000`).
+
+### Run (frontend)
+From `client/`:
+
+```bash
 npm run dev
 ```
 
 The Vite dev server defaults to port `5173`.
 
-### Running the MCP mock core and agent
-
-For local development of the MCP integration without a real MCP core, you can use the mock server and standalone agent under `server/src`.
-
-From the `server/` directory:
+### MCP mock core + agent (local)
+Useful for developing MCP integration without a real MCP core.
 
 ```bash
-# 1. Start the mock MCP core (expects Bearer dev-key-123)
 cd server
+
+# 1) Start mock MCP core (expects Bearer dev-key-123)
 node src/scripts/mockMcp.js
 
-# 2. Run the MCP agent directly (uses MCP_URL and MCP_API_KEY)
+# 2) Run MCP agent directly
 node src/agents/mcpAgent.js
 ```
 
-Example `.env` values for this flow (placed in `server/.env` or the repo root):
+Example `.env` values:
 
 ```bash
 MCP_URL=http://localhost:7070
@@ -165,62 +160,89 @@ MCP_API_KEY=dev-key-123
 ```
 
 ## Environment Configuration
+The backend uses `dotenv` and environment variables.
 
-The backend uses `dotenv` and environment variables for configuration.
-
-Key variables include (non‑exhaustive):
-
-- **MCP integration** (`server/src/config/env.js`)
-  - `MCP_URL` – URL of the MCP core (default `http://localhost:7000`).
-  - `MCP_API_KEY` – API key used in `Authorization: Bearer` headers.
-- **GitHub OAuth** (`server/routes/auth.github.js`)
+Common variables:
+- MCP:
+  - `MCP_URL` (default `http://localhost:7000`)
+  - `MCP_API_KEY`
+- GitHub OAuth:
   - `GITHUB_CLIENT_ID`
   - `GITHUB_CLIENT_SECRET`
   - `GITHUB_OAUTH_REDIRECT_URI`
   - `GITHUB_OAUTH_SCOPES`
-  - `FRONTEND_URL` – post‑login redirect (default `http://localhost:5173/connect`).
-  - `JWT_SECRET` – used to sign the `mcp_session` cookie.
-- **Server**
-  - `PORT` – Express listen port (default `3000`).
-  - Database connection settings (see `server/db.js`), typically a Postgres connection string.
+  - `FRONTEND_URL` (default `http://localhost:5173/connect`)
+  - `JWT_SECRET` (signs the `mcp_session` cookie)
+- Server:
+  - `PORT` (default `3000`)
+  - Postgres connection (see `server/db.js`)
 
-Authentication/session details:
+## GCP Cloud Run Usage
 
-- A JWT‑based session is stored in an `mcp_session` cookie.
-- `server/lib/requireSession.js` reads this cookie and sets `req.user` and `req.supabase`.
-- Most MCP and deployment‑related routes require a valid session.
+### What AutoDeploy generates
+When you select the **GCP** provider, AutoDeploy generates a GitHub Actions workflow that:
+- builds Docker images and pushes them to GHCR
+- authenticates to Google Cloud using **Workload Identity Federation (OIDC)**
+- pushes images to **Artifact Registry**
+- deploys **Cloud Run** services
+
+### Repo prerequisites
+Recommended repo layout:
+- `server/` (backend)
+- `client/` (frontend)
+
+AutoDeploy can scaffold Dockerfiles into these folders from the Dashboard.
+
+### Required GitHub Actions secrets
+Set these as **repository secrets** (GitHub repo → Settings → Secrets and variables → Actions):
+- `GCP_PROJECT_ID`
+- `GCP_REGION`
+- `GCP_WIF_PROVIDER` (full Workload Identity Provider resource name)
+- `GCP_DEPLOY_SA_EMAIL` (service account email)
+
+### Generate + commit the workflow
+1. In AutoDeploy UI: pick the target repo + branch.
+2. Go to **Configure**:
+   - set **Provider = GCP**
+   - choose stages (Build/Deploy)
+   - optionally override Cloud Run service names, docker contexts, and image names.
+3. Click **Generate pipeline**.
+4. Go to **Dashboard**:
+   - Step 1: generate/commit Dockerfiles into `server/` + `client/` (if needed)
+   - Step 2: commit the generated workflow YAML to the repo
+
+### Troubleshooting
+
+#### GHCR push denied (permission_denied: write_package)
+If the workflow fails pushing to `ghcr.io/*`:
+- ensure the repo allows **Workflow permissions → Read and write**
+- check GitHub package permissions for the target container image name
+- consider using repo-specific image names to avoid collisions
+
+#### WIF auth fails (unauthorized_client / attribute condition)
+This indicates your Workload Identity Provider or service account IAM binding is rejecting the GitHub OIDC token.
+- verify the provider’s attribute condition matches the repo (e.g. `owner/repo`) and branch you are deploying from
+- verify the service account grants **Workload Identity User** to the correct principalSet/principal
 
 ## Testing
-
-From the repo root, run the smoke test (requires the backend to be running locally):
+Run the smoke test (backend must be running locally):
 
 ```bash
 npm test
 ```
 
-This runs `node test/smoke.test.js`, which calls `GET /health` on the backend and fails if the response is not `{ ok: true }`.
+This runs `node test/smoke.test.js`, which calls `GET /health` and expects `{ ok: true }`.
 
 ## Project Structure
-
-High‑level layout:
 
 ```text
 AutoDeploy/
 ├── client/              # React + TypeScript + Vite frontend
-│   └── src/             # Pages, routes, components, stores, lib, styles, etc.
 ├── server/              # Express backend, MCP tools, auth, deployment logging
-│   ├── server.js        # Main Express entry point
-│   ├── db.js            # Postgres connection & health check
-│   ├── routes/          # Auth, MCP, deployments, pipeline sessions, Jenkins, etc.
-│   ├── lib/             # Session, GitHub helpers, pipelineVersions, Supabase helpers
-│   ├── tools/           # MCP tools (repo_reader, pipeline_generator, oidc_adapter, ...)
-│   └── src/             # MCP agent, config, mock MCP server, backend docs
-├── test/
-│   └── smoke.test.js    # Simple /health smoke test
-├── package.json          # Root scripts (dev, start, test) and backend deps
-└── client/package.json   # Frontend scripts (dev, build, lint, preview)
+├── test/                # smoke test(s)
+├── package.json         # root scripts (dev/start/test)
+└── client/package.json  # frontend scripts (dev/build/lint/preview)
 ```
 
 ## License
-
-This project is licensed under the **ISC License** (see `package.json`).
+ISC (see `package.json`).
