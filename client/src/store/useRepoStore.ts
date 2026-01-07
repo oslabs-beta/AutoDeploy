@@ -70,19 +70,31 @@ export const useRepoStore = create<RepoState & RepoActions>()(
 
       async loadBranches(repo: string) {
         console.log("[Store] loadBranches() start for repo:", repo);
-        set({ loading: true, error: undefined, repo, branch: null, branches: [] });
+        // Don't clear repo/branch here; let callers control that (e.g. setRepo).
+        // This also lets us hydrate branches for a previously selected repo
+        // without forcing the user to re-pick everything.
+        set({ loading: true, error: undefined });
 
         try {
           const result = await api.listBranches(repo);
           console.log("[Store] loadBranches() result:", result);
 
           const list = result?.branches ?? [];
+          const currentBranch = get().branch;
+
           const preferred =
-            list.find(b => b === "main") ??
-            list.find(b => b === "master") ??
+            // If the current branch is still valid for this repo, keep it.
+            ((currentBranch && list.includes(currentBranch)) ? currentBranch : null) ??
+            // Otherwise, prefer conventional default branches.
+            list.find((b) => b === "main") ??
+            list.find((b) => b === "master") ??
+            list.find((b) => b === "develop") ??
+            // Finally, fall back to the first branch if one exists.
+            list[0] ??
             null;
 
           set({
+            repo,
             branches: list,
             branch: preferred,
             loading: false,

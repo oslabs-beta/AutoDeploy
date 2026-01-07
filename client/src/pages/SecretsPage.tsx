@@ -59,6 +59,9 @@ export default function SecretsPage() {
 
           <div className="space-y-2">
             <p className="text-sm font-medium text-white">Required Secrets</p>
+            {cfg.lastSecretNotice && (
+              <p className="text-xs text-slate-200/80">{cfg.lastSecretNotice}</p>
+            )}
             <div className="rounded-md border border-white/20 bg-white/5">
               {cfg.secrets.length === 0 && (
                 <div className="p-3 text-sm text-slate-300">No secrets required.</div>

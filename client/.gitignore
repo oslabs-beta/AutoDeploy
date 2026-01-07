@@ -24,3 +24,8 @@ dist-ssr
 *.sw?
 
 .env.local
+
+*.md
+**/*.md
+!README.md
+!client/READme.md

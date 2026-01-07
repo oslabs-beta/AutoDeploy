@@ -82,6 +82,23 @@ Notable routes:
 - `/agent/*` – wizard orchestration endpoints
 - `/mcp/v1/*` – MCP tool façade
 - `/pipeline-sessions/*` – stateful wizard backed by Supabase tables
+Important route groups include:
+
+- `GET /health` – basic health check (used by the smoke test).
+- `GET /db/ping` – checks database connectivity via `healthCheck()` in `server/db.js`.
+- `/auth/github/*` – GitHub OAuth flow plus `/auth/github/me` inspection.
+- `/auth/local/*`, `/auth/google/*` – additional auth flows.
+- `/api/me` – session introspection (uses `requireSession`).
+- `/users`, `/connections` – basic user and connection CRUD backed by Postgres.
+- `/deployments/*` – deployment logs API, including retry, rollback, and workflow dispatch.
+- `/agent/*` – higher‑level "wizard" orchestration endpoints.
+- `/mcp/v1/*` – MCP tool façade (see below).
+- `/pipeline-sessions/*` – multi‑step pipeline wizard backed by Supabase tables.
+- `/api/rag/*` – repository RAG APIs (GitHub + zip ingest, query, logs) backed by Pinecone + Supabase; see `server/src/RAG_API_Contracts.md` for full contracts.
+- `/api/connections` – GitHub connection status endpoint used by the Secrets step to confirm that a GitHub token exists and has write access for the selected repo.
+- `/api/secrets/github/*` – GitHub Actions secrets presence + upsert endpoints used by the Secrets step to check and create `AWS_ROLE_ARN` (repo/env level) without exposing values.
+
+The backend expects a Postgres database (e.g., via a Supabase connection string) configured in `server/db.js`.
 
 ### MCP tools
 
@@ -99,6 +116,20 @@ Each tool defines:
 
 - an `input_schema` (Zod)
 - a `handler` function
+- `repo`, `repo_reader` → repository discovery and branch listing.
+- `pipeline_generator` → synthesizes CI/CD workflow YAML.
+- `oidc`, `oidc_adapter` → handles AWS OIDC roles and related configuration.
+- `github`, `github_adapter` → GitHub automation (e.g., file upserts, workflow dispatch).
+- `gcp`, `gcp_adapter`, `scaffold`, `scaffold_generator` → GCP‑specific workflow scaffolding.
+- `rag_ingest_zip`, `rag_ingest_github`, `rag_query_namespace`, `rag_get_logs` → local repo RAG tools (Pinecone embeddings + Supabase logs) used by MCP v2 and `/api/rag`.
+
+Each tool defines an `input_schema` (Zod) and a `handler` function. The `mcp` route:
+
+- Injects `user_id` and `github_username` from the current session.
+- Validates input using the tool’s schema.
+- Normalizes responses to `{ success: true/false, data | error }`.
+
+> **Note:** The autodeploy-landing marketing site and docs now call these MCP v1 endpoints directly for live demos (e.g., `repo_reader` and `pipeline_history`) when pointed at the same backend, so changes to `/mcp/v1/*` should keep the v1 envelopes and contracts stable.
 
 ### Frontend
 
@@ -110,6 +141,16 @@ Key elements:
 - state: Zustand stores in `client/src/store`
 - API layer: `client/src/lib/api.ts` (REST + `/mcp/v1/*` calls)
 - UI components: `client/src/components`
+- Pages and routes in `client/src/pages` and `client/src/routes` implement the connect/login flow, configuration wizard, secrets management, Jenkins page, dashboard, and 404.
+- Zustand stores in `client/src/store` (e.g., `usePipelineStore`, `useWizardStore`, `useDeployStore`, `useAuthStore`, `useConfigStore`) hold wizard selections, auth/session info, pipeline generation results, secrets/preflight state, and deployment data.
+- `client/src/lib/api.ts` wraps REST and MCP calls, handles GitHub OAuth redirects, caches AWS roles and repo lists, and orchestrates pipeline commit and rollback.
+- UI components under `client/src/components` include shared primitives (`ui/`), layout and nav (`common/`), wizard steps (`wizard/`), and dashboard widgets (`dashboard/`).
+
+In development, the frontend talks to the backend through a Vite dev server proxy:
+
+- `BASE = import.meta.env.VITE_API_BASE || "/api"`
+- In dev, `BASE` is typically `/api`, which is proxied to the Express backend.
+- `SERVER_BASE` is derived from `BASE` for direct `/mcp/v1/*` and `/auth/*` calls.
 
 ## Getting Started
 
@@ -377,6 +418,22 @@ npm test
 
 This runs `node test/smoke.test.js`, which calls `GET /health` and expects `{ ok: true }`.
 
+Additional tests:
+
+```bash
+# Run authorization tests for Workflow Copilot / RAG gating
+node --test test/authorization.test.js
+```
+
+These cover:
+
+- `isPro(user)` behavior for free vs pro vs beta-pro users.
+- `can(user, Actions.USE_AGENT)` (agent + RAG gating) vs `can(user, Actions.USE_MCP_TOOL)` (MCP access for all authenticated users).
+
+### Additional backend tests
+
+- `node --test server/tests/pipelineGeneratorYaml.test.js` – sanity-checks that `pipeline_generator` always emits syntactically valid GitHub Actions YAML for the main templates (`node_app`, `python_app`). This guards against indentation/`with:` mapping regressions.
+
 ## Project Structure
 
 ```text
@@ -387,6 +444,10 @@ AutoDeploy/
 ├── package.json         # root scripts (dev/start/test)
 └── client/package.json  # frontend scripts (dev/build/lint/preview)
 ```
+
+## Repo housekeeping
+
+Most internal Markdown documentation (design docs, technical notes, etc.) is intentionally not tracked in git. By default, only the root `README.md` and `client/README.md` are versioned to keep the repo lean.
 
 ## License
 

@@ -3,10 +3,25 @@ import { useRepoStore } from "../store/useRepoStore";
 import { usePipelineStore } from "../store/usePipelineStore";
 import { useWizardStore } from "../store/useWizardStore";
 import { api } from "../lib/api";
+import { useAuthStore } from "../store/useAuthStore";
+
+type CopilotSuggestion = {
+  id: string;
+  title: string;
+  description: string;
+};
 
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
+  suggestions?: CopilotSuggestion[];
+  meta?: {
+    toolCalled?: string;
+    agentDecision?: string;
+    mode?: "user" | "pro";
+    usedRag?: boolean;
+    noWorkflowContext?: boolean;
+  };
 };
 
 export default function ConfigurePage() {
@@ -23,6 +38,8 @@ export default function ConfigurePage() {
     status,
     error,
     result,
+    workflows,
+    selectedWorkflowPath,
     setTemplate,
     setProvider,
     toggleStage,
@@ -37,6 +54,9 @@ export default function ConfigurePage() {
     setEditedYaml,
     getEffectiveYaml,
     hydrateFromWizard,
+    loadWorkflows,
+    selectWorkflow,
+    setPipelineName,
   } = usePipelineStore();
 
   const {
@@ -47,6 +67,9 @@ export default function ConfigurePage() {
     setLastToolCalled,
   } = useWizardStore();
 
+  const { user } = useAuthStore();
+  const isPro = !!(user && (user.plan === "pro" || (user as any).beta_pro_granted));
+
   const yaml = getEffectiveYaml();
   const busy = status === "loading";
 
@@ -55,7 +78,7 @@ export default function ConfigurePage() {
     {
       role: "assistant",
       content:
-        "Hi! I'm your CI/CD wizard. Tell me about your repo and how you'd like your GitHub Actions YAML to behave (build, test, deploy, environments, branches, etc.).",
+        "Hi! I'm your Workflow Copilot. I can read your repo's workflows, explain what they do today, and suggest improvements or new GitHub Actions YAML for you to review.",
     },
   ]);
   const [chatInput, setChatInput] = useState("");
@@ -66,6 +89,12 @@ export default function ConfigurePage() {
     if (!repo || !branch || provider !== "aws") return;
     loadAwsRoles().catch(console.error);
   }, [repo, branch, provider, loadAwsRoles]);
+
+  // Load existing workflows for the selected repo (if any)
+  useEffect(() => {
+    if (!repo) return;
+    loadWorkflows(repo).catch(console.error);
+  }, [repo, loadWorkflows]);
 
   const handleGenerate = async () => {
     if (!repo || !branch) {
@@ -81,6 +110,20 @@ export default function ConfigurePage() {
       stages,
       options,
     });
+  };
+
+  const handleProposePipeline = async () => {
+    // For regular users (non-pro), "Propose CI pipeline" should directly
+    // generate a pipeline using the current form settings, without
+    // going through the free-form agent chat.
+    if (!isPro) {
+      await handleGenerate();
+      return;
+    }
+
+    // Pro users keep the agent-driven behavior.
+    setChatInput("Propose a complete GitHub Actions CI pipeline for this repo.");
+    setTimeout(() => handleSendChat(), 0);
   };
 
   const handleOpenPr = async () => {
@@ -109,8 +152,10 @@ export default function ConfigurePage() {
     // The AI is a planner, not an authority. UI state must be updated first.
     const lower = trimmed.toLowerCase();
 
-    // Reset to defaults first
-    let nextStages: Array<"build" | "test" | "deploy"> = ["build", "test", "deploy"];
+    // Start from the current UI state; the wizard is a planner, not an
+    // authority. We only change stages when the user explicitly asks
+    // (e.g. "no deploy", "just build").
+    let nextStages: Array<"build" | "test" | "deploy"> = [...stages];
 
     if (lower.includes("just build") || lower.includes("only build")) {
       nextStages = ["build"];
@@ -121,10 +166,32 @@ export default function ConfigurePage() {
       nextStages = ["build", "test"];
     } else if (
       lower.includes("no deploy") ||
-      lower.includes("without deploy")
+      lower.includes("without deploy") ||
+      lower.includes("remove deploy") ||
+      lower.includes("remove the deploy") ||
+      lower.includes("remove deployment") ||
+      lower.includes("disable deploy") ||
+      lower.includes("disable deployment") ||
+      lower.includes("i dont want the deploy") ||
+      lower.includes("i don't want the deploy")
     ) {
       nextStages = ["build", "test"];
     }
+
+    const deployTurnedOff = stages.includes("deploy") && !nextStages.includes("deploy");
+    const onlyStageChangeIntent =
+      deployTurnedOff &&
+      // Heuristic: user is clearly talking about deploy, and not asking
+      // for a completely new pipeline description in the same turn.
+      (lower.includes("no deploy") ||
+        lower.includes("without deploy") ||
+        lower.includes("remove deploy") ||
+        lower.includes("remove the deploy") ||
+        lower.includes("remove deployment") ||
+        lower.includes("disable deploy") ||
+        lower.includes("disable deployment") ||
+        lower.includes("i dont want the deploy") ||
+        lower.includes("i don't want the deploy"));
 
     // Apply stage changes to the pipeline store
     (["build", "test", "deploy"] as const).forEach((stage) => {
@@ -134,6 +201,21 @@ export default function ConfigurePage() {
         toggleStage(stage);
       }
     });
+
+    // If this turn is clearly about changing stages (e.g. "remove deploy")
+    // and we already have a repo/branch, auto-regenerate the pipeline so
+    // the YAML below stays in sync, then continue to send the prompt so
+    // the assistant can acknowledge the change.
+    if (onlyStageChangeIntent && repo && branch) {
+      await regenerate({
+        repo,
+        branch,
+        template,
+        provider,
+        stages: nextStages,
+        options,
+      });
+    }
 
     if (!repo || !branch) {
       alert(
@@ -151,11 +233,16 @@ export default function ConfigurePage() {
       // Send the same provider/config context that the manual generator uses.
       // This prevents the wizard from producing generic placeholder provider steps.
       const pipelineSnapshot = {
+        repo,
         template,
         provider,
         branch,
         stages: nextStages,
         options,
+        // If we already have a pipeline_name (e.g. from Existing workflows
+        // or the New workflow file input), pass it through so the backend
+        // wizard can mention/use the same filename.
+        pipeline_name: (result as any)?.pipeline_name,
       };
 
       const res = await api.askYamlWizard({
@@ -168,8 +255,20 @@ export default function ConfigurePage() {
         pipelineSnapshot,
       });
 
-      if ((res as any)?.tool_called) {
-        setLastToolCalled((res as any).tool_called);
+      const toolCalled = (res as any)?.tool_called as string | undefined;
+      const agentDecision = (res as any)?.agent_decision as string | undefined;
+      const backendMode = (res as any)?.mode as "user" | "pro" | undefined;
+      const ragNamespace = (res as any)?.rag_namespace as string | undefined;
+      const suggestions = (res as any)?.suggestions as CopilotSuggestion[] | undefined;
+      const noWorkflowContext = !!(res as any)?.no_workflow_context;
+      const usedRag = !!(
+        toolCalled === "rag_query" ||
+        agentDecision === "rag_workflow_analysis" ||
+        ragNamespace
+      );
+
+      if (toolCalled) {
+        setLastToolCalled(toolCalled);
       }
 
       if (repo) {
@@ -178,7 +277,7 @@ export default function ConfigurePage() {
         });
       }
 
-      if ((res as any)?.tool_called === "pipeline_generator") {
+      if (toolCalled === "pipeline_generator") {
         const generatedYaml =
           (res as any)?.generated_yaml ??
           (res as any)?.tool_output?.data?.generated_yaml;
@@ -212,7 +311,7 @@ export default function ConfigurePage() {
       } else if ((res as any)?.message) {
         text = (res as any).message;
       } else if (
-        (res as any)?.tool_called === "repo_reader" &&
+        toolCalled === "repo_reader" &&
         Array.isArray((res as any)?.tool_output?.data?.data?.repositories)
       ) {
         const count = (res as any).tool_output.data.data.repositories.length;
@@ -227,6 +326,14 @@ export default function ConfigurePage() {
       const assistantMessage: ChatMessage = {
         role: "assistant",
         content: text,
+        suggestions: Array.isArray(suggestions) ? suggestions.slice(0, 5) : undefined,
+        meta: {
+          toolCalled,
+          agentDecision,
+          mode: backendMode,
+          usedRag,
+          noWorkflowContext,
+        },
       };
 
       setChatMessages((prev) => [...prev, assistantMessage]);
@@ -278,6 +385,86 @@ export default function ConfigurePage() {
         <div className="grid gap-6 lg:grid-cols-[1.8fr_1.8fr]">
           {/* ===== Left: Config form ===== */}
           <section className="space-y-6 rounded-2xl border border-white/20 bg-white/10 backdrop-blur-md shadow-glass p-6 text-white">
+            {/* Existing workflows selector (read-only YAML import) */}
+            <label className="grid gap-1">
+              <span className="text-sm font-medium text-white">Existing workflows</span>
+              <select
+                disabled={!repo || workflows.length === 0}
+                value={selectedWorkflowPath ?? ""}
+                onChange={(e) => {
+                  const path = e.target.value;
+                  if (!path || !repo) return;
+                  selectWorkflow(repo, path);
+                }}
+                className="rounded-md border border-white/25 bg-white px-3 py-2 text-sm text-slate-900 placeholder-slate-500"
+              >
+                <option value="">
+                  {workflows.length === 0
+                    ? "No workflows found in .github/workflows"
+                    : "Select an existing workflow (optional)"}
+                </option>
+                {workflows.map((wf) => {
+                  const shortPath = wf.path.startsWith(".github/workflows/")
+                    ? wf.path.replace(".github/workflows/", "")
+                    : wf.path;
+                  const state = wf.state === "active" ? "active" : wf.state;
+                  return (
+                    <option key={wf.path} value={wf.path}>
+                      {shortPath} {state ? `(${state})` : ""}
+                    </option>
+                  );
+                })}
+              </select>
+              <span className="text-xs text-slate-200">
+                Loading a workflow here updates the YAML preview below but does
+                not change the template or form fields.
+              </span>
+            </label>
+
+            {/* New workflow file name (for repos without existing YAML) */}
+            <label className="grid gap-1">
+              <span className="text-sm font-medium text-white">New workflow file</span>
+              <div className="flex items-center gap-2">
+                {(() => {
+                  const pipelineName = (result as any)?.pipeline_name as
+                    | string
+                    | undefined;
+                  const base = (pipelineName || "ci.yml").replace(/\.ya?ml$/i, "");
+                  return (
+                    <input
+                      type="text"
+                      disabled={busy}
+                      value={base}
+                      onChange={(e) => {
+                        const raw = e.target.value || "";
+                        let norm = raw.toLowerCase();
+                        norm = norm.replace(/\s+/g, "-");
+                        // remove characters that are likely to cause issues
+                        norm = norm.replace(/[^a-z0-9._-]/g, "");
+                        if (norm.length > 50) norm = norm.slice(0, 50);
+                        if (!norm) norm = "ci";
+                        const finalName = `${norm}.yml`;
+                        setPipelineName(finalName);
+                      }}
+                      className="flex-1 rounded-md border border-white/25 bg-white px-3 py-2 text-sm font-mono text-slate-900 placeholder-slate-500"
+                      placeholder="ci"
+                    />
+                  );
+                })()}
+                <span className="text-xs font-mono text-slate-200">.yml</span>
+              </div>
+              <span className="text-xs text-slate-200">
+                Will be committed as
+                {" "}
+                <span className="font-mono">
+                  {`.github/workflows/${
+                    ((result as any)?.pipeline_name as string | undefined) || 'ci.yml'
+                  }`}
+                </span>
+                .
+              </span>
+            </label>
+
             {/* Template */}
             <label className="grid gap-1">
               <span className="text-sm font-medium text-white">Template</span>
@@ -290,6 +477,7 @@ export default function ConfigurePage() {
                 <option value="node_app">Node.js app</option>
                 <option value="python_app">Python App</option>
                 <option value="container_service">Container</option>
+                <option value="aws_static_vite">AWS Static Frontend (Vite)</option>
               </select>
               <span className="text-xs text-slate-200">
                 Pick the closest match to your repo; the MCP backend refines it.
@@ -420,7 +608,9 @@ export default function ConfigurePage() {
                 <span className="text-sm font-medium">AWS Role (OIDC)</span>
                 <select
                   disabled={busy || !roles.length}
-                  value={options.awsRoleArn ?? ""}
+                  value={roles.some((r) => r.arn === options.awsRoleArn)
+                    ? options.awsRoleArn ?? ""
+                    : ""}
                   onChange={(e) => setOption("awsRoleArn", e.target.value)}
                   className="rounded-md border border-white/25 px-3 py-2 text-sm bg-black text-white"
                 >
@@ -432,9 +622,22 @@ export default function ConfigurePage() {
                   ))}
                 </select>
                 <span className="text-xs text-slate-200">
-                  Roles come from the backend OIDC adapter; we’ll wire this into
-                  the deploy job.
+                  Roles currently come from a mock OIDC adapter; for production,
+                  you can also paste a custom ARN below.
                 </span>
+              </label>
+
+              <label className="grid gap-1">
+                <span className="text-xs text-slate-200">
+                  Or paste a custom IAM Role ARN
+                </span>
+                <input
+                  disabled={busy}
+                  value={options.awsRoleArn ?? ""}
+                  onChange={(e) => setOption("awsRoleArn", e.target.value)}
+                  className="rounded-md border border-white/25 px-3 py-2 text-xs font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                  placeholder="arn:aws:iam::123456789012:role/github-oidc-role"
+                />
               </label>
               <label className="grid gap-1">
                 <span className="text-sm font-medium">AWS Role Session Name</span>
@@ -457,6 +660,54 @@ export default function ConfigurePage() {
                   placeholder="us-east-1"
                 />
               </label>
+
+              {template === "aws_static_vite" && (
+                <>
+                  <label className="grid gap-1">
+                    <span className="text-sm font-medium text-white">AWS Account ID</span>
+                    <input
+                      disabled={busy}
+                      value={options.awsAccountId ?? ""}
+                      onChange={(e) => setOption("awsAccountId", e.target.value)}
+                      className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                      placeholder="123456789012"
+                    />
+                  </label>
+
+                  <label className="grid gap-1">
+                    <span className="text-sm font-medium text-white">S3 Bucket</span>
+                    <input
+                      disabled={busy}
+                      value={options.s3Bucket ?? ""}
+                      onChange={(e) => setOption("s3Bucket", e.target.value)}
+                      className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                      placeholder="autodeploy-landing-prod"
+                    />
+                  </label>
+
+                  <label className="grid gap-1">
+                    <span className="text-sm font-medium text-white">CloudFront Distribution ID</span>
+                    <input
+                      disabled={busy}
+                      value={options.cloudFrontDistributionId ?? ""}
+                      onChange={(e) => setOption("cloudFrontDistributionId", e.target.value)}
+                      className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                      placeholder="E123ABC456XYZ"
+                    />
+                  </label>
+
+                  <label className="grid gap-1">
+                    <span className="text-sm font-medium text-white">Output directory</span>
+                    <input
+                      disabled={busy}
+                      value={options.outputDir ?? ""}
+                      onChange={(e) => setOption("outputDir", e.target.value)}
+                      className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                      placeholder="dist"
+                    />
+                  </label>
+                </>
+              )}
               </>
             )}
 
@@ -769,19 +1020,51 @@ export default function ConfigurePage() {
             )}
           </section>
 
-          {/* ===== Right: AI YAML Wizard Chat ===== */}
+          {/* ===== Right: Workflow Copilot Chat ===== */}
           <section className="flex flex-col rounded-2xl border border-white/20 bg-white/10 backdrop-blur-md shadow-glass p-6 text-white">
             <div className="mb-3 flex items-center justify-between gap-2">
               <div>
-                <h2 className="text-sm font-medium">AI YAML wizard</h2>
+                <h2 className="text-sm font-medium">Workflow Copilot</h2>
                 <p className="text-xs text-slate-200">
-                  Describe how you want your workflow to behave. I’ll suggest
-                  envs, branches, caching, matrix builds, etc.
+                  Ask how your repo’s CI/CD works today, what’s missing, or have me propose a better GitHub Actions workflow.
                 </p>
               </div>
+              <span className="inline-flex items-center rounded-full border border-white/30 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-100 bg-black/20">
+                {isPro ? "Pro" : "User"}
+              </span>
             </div>
 
             {/* Chat messages */}
+            <div className="mb-2 flex flex-wrap gap-2 text-[11px] text-slate-200">
+              <button
+                type="button"
+                className="rounded-full border border-white/25 bg-white/5 px-2 py-0.5 hover:bg-white/10"
+                onClick={() => {
+                  setChatInput("Analyze my current workflows and tell me what they do.");
+                  // Fire immediately for snappier UX
+                  setTimeout(() => handleSendChat(), 0);
+                }}
+              >
+                Analyze workflows
+              </button>
+              <button
+                type="button"
+                className="rounded-full border border-white/25 bg-white/5 px-2 py-0.5 hover:bg-white/10"
+                onClick={() => {
+                  setChatInput("Suggest a short list of improvements to my CI (tests, build, deploy, caching).");
+                  setTimeout(() => handleSendChat(), 0);
+                }}
+              >
+                Suggest improvements
+              </button>
+              <button
+                type="button"
+                className="rounded-full border border-white/25 bg-white/5 px-2 py-0.5 hover:bg-white/10"
+                onClick={handleProposePipeline}
+              >
+                Propose CI pipeline
+              </button>
+            </div>
             <div className="flex-1 min-h-[360px] max-h-[576px] overflow-y-auto rounded-md border border-white/20 bg-white/5 px-3 py-2 space-y-2">
               {chatMessages.map((m, idx) => (
                 <div
@@ -808,28 +1091,104 @@ export default function ConfigurePage() {
               )}
             </div>
 
-            {/* Chat input */}
-            <div className="mt-3 space-y-2">
-              <textarea
-                className="w-full rounded-md border border-white/25 bg-white/10 text-white px-3 py-2 text-xs resize-none placeholder-white/60"
-                rows={3}
-                placeholder="E.g. I want this to run only on main and PRs, use Node 20, cache npm, and deploy to prod on tags starting with v*…"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={handleChatKeyDown}
-                disabled={chatLoading}
-              />
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={handleSendChat}
-                  disabled={chatLoading || !chatInput.trim()}
-                  className="rounded-md bg-white/20 hover:bg-white/30 px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {chatLoading ? "Asking…" : "Ask wizard"}
-                </button>
+            {/* Compact read-only output for regular users */}
+            {!isPro && (
+              <div className="mb-3 rounded-md border border-white/20 bg-white/5 px-3 py-2 text-[11px] text-slate-100 whitespace-pre-wrap max-h-56 overflow-y-auto">
+                {chatLoading ? (
+                  <span>Analyzing your workflows…</span>
+                ) : (
+                  (() => {
+                    const lastAssistant = [...chatMessages]
+                      .reverse()
+                      .find((m) => m.role === "assistant");
+                    return lastAssistant?.content ||
+                      "Click Analyze workflows to see a summary of your existing GitHub Actions files.";
+                  })()
+                )}
               </div>
-            </div>
+            )}
+
+            {/* Chat transcript (Pro only). Regular users only see the
+                canned quick actions above, which trigger specific
+                analyze/suggest behaviours. */}
+            {isPro && (
+              <>
+                <div className="flex-1 min-h-[260px] overflow-y-auto rounded-md border border-white/20 bg-white/5 px-3 py-2 space-y-2">
+                  {chatMessages.map((m, idx) => (
+                    <div
+                      key={idx}
+                      className={`flex ${
+                        m.role === "user" ? "justify-end" : "justify-start"
+                      }`}
+                    >
+                      <div className="max-w-[80%] space-y-1">
+                        <div
+                          className={`rounded-lg px-3 py-2 text-xs whitespace-pre-wrap ${
+                            m.role === "user"
+                              ? "bg-white/20 text-white border border-white/30"
+                              : "bg-white text-slate-900 border border-slate-200"
+                          }`}
+                        >
+                          {m.content}
+                        </div>
+                        {m.role === "assistant" && m.meta?.usedRag && (
+                          <div className="text-[10px] text-emerald-200">
+                            Used repo-aware RAG context (Pro)
+                          </div>
+                        )}
+                        {m.role === "assistant" &&
+                          Array.isArray(m.suggestions) &&
+                          m.suggestions.length > 0 && (
+                            <div className="ml-1 text-[11px] text-slate-900 bg-white/90 rounded-md px-2 py-1">
+                              <div className="mb-1 font-semibold">
+                                {m.meta?.noWorkflowContext
+                                  ? "Generic best-practice suggestions:"
+                                  : "Suggested workflow improvements:"}
+                              </div>
+                              <ul className="list-disc pl-4">
+                                {m.suggestions.map((s) => (
+                                  <li key={s.id} className="mb-0.5 last:mb-0">
+                                    <span className="font-semibold">{s.title}: </span>
+                                    <span>{s.description}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                      </div>
+                    </div>
+                  ))}
+                  {chatLoading && (
+                    <p className="text-[11px] text-slate-200">
+                      Thinking about your pipeline…
+                    </p>
+                  )}
+                </div>
+
+                {/* Free-form chat input (Pro only) */}
+                <div className="mt-3 space-y-2">
+                  <textarea
+                    className="w-full rounded-md border border-white/25 bg-white/10 text-white px-3 py-2 text-xs resize-none placeholder-white/60"
+                    rows={3}
+                    placeholder="E.g. I want this to run only on main and PRs, use Node 20, cache npm, and deploy to prod on tags starting with v*…"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={handleChatKeyDown}
+                    disabled={chatLoading}
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={handleSendChat}
+                      disabled={chatLoading || !chatInput.trim()}
+                      className="rounded-md bg-white/20 hover:bg-white/30 px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {chatLoading ? "Asking…" : "Ask wizard"}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
           </section>
         </div>
 

@@ -17,7 +17,12 @@ const {
   GITHUB_OAUTH_REDIRECT_URI,
   GITHUB_OAUTH_SCOPES,
   JWT_SECRET,
+  BETA_AUTO_BETA_PRO,
 } = process.env;
+
+// During beta, automatically grant `beta_pro_granted` to users created via
+// GitHub OAuth when this flag is true. Mirrors the local auth behavior.
+const AUTO_BETA_PRO = BETA_AUTO_BETA_PRO === 'true';
 
 // URL to redirect user to the apropiate endpoint after GitHub authentication success
 const FRONTEND_URL =
@@ -154,14 +159,15 @@ router.get('/callback', async (req, res) => {
 
     if (!existingSessionUserId) {
       // Normal OAuth flow: create/upsert a user identity based on GitHub email.
+      // New users created here can be granted beta_pro_granted during beta.
       const { rows: userRows } = await query(
         `
-        insert into users (email, github_username)
-        values ($1, $2)
+        insert into users (email, github_username, beta_pro_granted)
+        values ($1, $2, $3)
         on conflict (email) do update set github_username = excluded.github_username
         returning *;
         `,
-        [email, ghUser.login]
+        [email, ghUser.login, AUTO_BETA_PRO]
       );
       user = userRows[0];
     }

@@ -4,19 +4,6 @@ import fetch from 'node-fetch';
 
 dotenv.config();
 
-const MCP_BASE_URL =
-  (process.env.MCP_BASE_URL || 'http://localhost:3000/mcp/v1').replace(
-    /\/$/,
-    ''
-  );
-
-// Internal base URL for calling our own RAG HTTP API.
-// Defaults to talking to this server on PORT (or 3000).
-const RAG_BASE_URL = (
-  process.env.RAG_BASE_URL ||
-  `http://127.0.0.1:${process.env.PORT || 3000}`
-).replace(/\/$/, '');
-
 // Added by Lorenc
 // Lazily create the OpenAI client so the server can boot even if OPENAI_API_KEY is missing.
 // We only require the key when the wizard agent actually needs to call OpenAI.
@@ -82,7 +69,7 @@ User request:
 // Helper: call MCP routes dynamically, with error handling
 async function callMCPTool(tool, input, cookie) {
   try {
-    const response = await fetch(`${MCP_BASE_URL}/${tool}`, {
+    const response = await fetch(`http://localhost:3000/mcp/v1/${tool}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -97,208 +84,12 @@ async function callMCPTool(tool, input, cookie) {
     return await response.json();
   } catch (err) {
     console.warn('⚠️ MCP call failed:', err.message || err);
-    return {
-      success: false,
-      error: 'MCP server unreachable',
-      details: err?.message,
-    };
+    return { error: 'MCP server unreachable' };
   }
-}
-
-// Simple pro-only RAG helpers -------------------------------------------------
-
-function normalizeGithubRepoUrl(repoUrlOrSlug) {
-  if (!repoUrlOrSlug) return null;
-  if (repoUrlOrSlug.startsWith('http://') || repoUrlOrSlug.startsWith('https://')) {
-    return repoUrlOrSlug;
-  }
-  // Treat as owner/repo slug
-  const slug = repoUrlOrSlug.replace(/^https?:\/\/github.com\//i, '').replace(/\.git$/i, '');
-  return `https://github.com/${slug}`;
-}
-
-// Lightweight YAML summarization used in user mode when analyzing workflows
-async function summarizeWorkflowYamlForUser({ repoSlug, workflowName, workflowPath, yaml }) {
-  if (!yaml || typeof yaml !== 'string' || !yaml.trim()) return '';
-
-  let client;
-  try {
-    client = getOpenAIClient();
-  } catch (e) {
-    console.warn(
-      '⚠️ Skipping workflow YAML summaries (OpenAI not configured):',
-      e?.message || e
-    );
-    return '';
-  }
-
-  try {
-    const resp = await client.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content:
-            'You are a CI/CD assistant. Given a GitHub Actions workflow YAML, briefly explain when it runs (triggers) and what its main jobs/steps do. Then suggest 1-3 concrete, practical improvements. Keep the answer under 200 words.',
-        },
-        {
-          role: 'user',
-          content:
-            `Repository: ${repoSlug}\n` +
-            `Workflow: ${workflowName}\n` +
-            `Path: ${workflowPath}\n\n` +
-            'YAML:\n' +
-            yaml,
-        },
-      ],
-    });
-
-    const text = resp?.choices?.[0]?.message?.content || '';
-    return text.trim();
-  } catch (e) {
-    console.warn(
-      '⚠️ Failed to summarize workflow YAML for user mode:',
-      e?.message || e
-    );
-    return '';
-  }
-}
-
-async function ragIngestGithub({ repoUrl, cookie }) {
-  const githubUrl = normalizeGithubRepoUrl(repoUrl);
-  console.log('[RAG][ingest] Starting GitHub workflows ingest', {
-    repoUrl,
-    normalized: githubUrl,
-    RAG_BASE_URL,
-  });
-
-  // For workflow analysis we only need YAML workflows, not the
-  // entire repository. Use the /ingest/github-workflows endpoint
-  // which indexes just .yml/.yaml files.
-  const res = await fetch(`${RAG_BASE_URL}/api/rag/ingest/github-workflows`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Cookie: cookie || '',
-    },
-    body: JSON.stringify({ repoUrl: githubUrl, includeIssues: false }),
-  });
-
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    console.error('[RAG][ingest] GitHub workflows ingest failed', {
-      status: res.status,
-      error: data?.error,
-      body: data,
-    });
-    throw new Error(data?.error || `RAG ingest failed with status ${res.status}`);
-  }
-
-  console.log('[RAG][ingest] GitHub workflows ingest succeeded', {
-    namespace: data?.namespace,
-    repo: data?.repo,
-    fileCount: data?.fileCount,
-    chunkCount: data?.chunkCount,
-    upserted: data?.upserted,
-  });
-
-  return data; // includes { namespace, repo, fileCount, ... }
-}
-
-async function ragQueryNamespace({ namespace, question, topK = 5, cookie }) {
-  console.log('[RAG][query] Starting namespace query', {
-    namespace,
-    topK,
-    questionPreview: (question || '').slice(0, 200),
-  });
-
-  const res = await fetch(`${RAG_BASE_URL}/api/rag/query`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Cookie: cookie || '',
-    },
-    body: JSON.stringify({ namespace, question, topK }),
-  });
-
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    console.error('[RAG][query] Namespace query failed', {
-      status: res.status,
-      error: data?.error,
-      body: data,
-    });
-    throw new Error(data?.error || `RAG query failed with status ${res.status}`);
-  }
-
-  console.log('[RAG][query] Namespace query succeeded', {
-    namespace,
-    answerPreview: (data?.answer || '').slice(0, 200),
-    sourceCount: Array.isArray(data?.sources) ? data.sources.length : 0,
-    sources: Array.isArray(data?.sources)
-      ? data.sources.map((s) => ({ path: s.path, idx: s.idx, score: s.score }))
-      : [],
-  });
-
-  return data; // { answer, sources }
-}
-
-async function extractWorkflowSuggestionsFromAnswer(question, ragAnswer) {
-  try {
-    const client = getOpenAIClient();
-    const resp = await client.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content:
-            'You summarize CI/CD workflow advice. Extract up to 3 concrete workflow improvement suggestions as JSON.',
-        },
-        {
-          role: 'user',
-          content:
-            `User question:\n${question}\n\nAnswer about the repo:\n${ragAnswer}\n\n` +
-            'Return ONLY valid JSON: an array of {"id": string, "title": string, "description": string}.',
-        },
-      ],
-    });
-
-    let raw = resp?.choices?.[0]?.message?.content || '[]';
-    raw = raw.trim();
-    // Handle common pattern where the model wraps JSON in ```json ... ``` fences
-    if (raw.startsWith('```')) {
-      raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/```$/i, '').trim();
-    }
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      return parsed.map((s, idx) => ({
-        id: s.id || `s${idx + 1}`,
-        title: s.title || 'Suggestion',
-        description: s.description || '',
-      }));
-    }
-  } catch (e) {
-    console.warn('⚠️ Failed to extract workflow suggestions from RAG answer:', e?.message || e);
-  }
-  return [];
-}
-
-async function askRagForWorkflows({ user, repoUrl, question, cookie }) {
-  if (!RAG_BASE_URL) {
-    throw new Error('RAG_BASE_URL is not configured');
-  }
-  const ingest = await ragIngestGithub({ repoUrl, cookie });
-  const namespace = ingest.namespace;
-  const query = await ragQueryNamespace({ namespace, question, topK: 5, cookie });
-  const answer = query?.answer || '';
-  const sources = query?.sources || [];
-  const suggestions = await extractWorkflowSuggestionsFromAnswer(question, answer);
-  return { namespace, answer, sources, suggestions };
 }
 
 // Wizard Agent Core
-export async function runWizardAgent(userPrompt, options = {}) {
-  const { mode = 'user', user = null, allowPipelineCommit = false } = options;
+export async function runWizardAgent(userPrompt) {
   // Normalize userPrompt into a consistent text form + extract cookie
   const userPromptText =
     typeof userPrompt === 'string'
@@ -348,209 +139,6 @@ Tell me what you’d like to do next.
     userPrompt?.pipelineSnapshot ||
     userPrompt?.body?.pipelineSnapshot ||
     null;
-
-  // Detect workflow-analysis questions
-  const lower = userPromptText.toLowerCase();
-  const looksLikeWorkflowAnalysis =
-    /workflow|ci\/cd|pipeline|github actions/.test(lower) &&
-    /(analy|explain|understand|what.*do|how.*work|missing)/.test(lower);
-
-  const repoUrlFromInput =
-    userPrompt?.repoUrl ||
-    userPrompt?.body?.repoUrl ||
-    pipelineSnapshot?.repo ||
-    null;
-
-// User mode: try lightweight workflow analysis via github_adapter (no RAG)
-  if (mode === 'user' && repoUrlFromInput && looksLikeWorkflowAnalysis) {
-    try {
-      let slug = null;
-      if (/^https?:\/\//i.test(repoUrlFromInput)) {
-        try {
-          const u = new URL(repoUrlFromInput);
-          const parts = u.pathname
-            .replace(/^\//, '')
-            .replace(/\.git$/i, '')
-            .split('/');
-          if (parts[0] && parts[1]) slug = `${parts[0]}/${parts[1]}`;
-        } catch {
-          // ignore
-        }
-      } else if (repoUrlFromInput.includes('/')) {
-        slug = repoUrlFromInput;
-      }
-
-      if (slug) {
-        const outer = await callMCPTool(
-          'github_adapter',
-          { action: 'workflows', repo: slug },
-          cookie
-        );
-
-        const body =
-          outer && typeof outer === 'object' && 'data' in outer
-            ? outer.data
-            : outer;
-        const workflows = body?.workflows;
-
-        if (Array.isArray(workflows)) {
-          if (workflows.length === 0) {
-            const reply =
-              `I didn’t find any GitHub Actions workflows for ${slug}. You can ask me to propose a new CI pipeline for this repo.`;
-            return {
-              success: true,
-              agent_decision: 'user_workflow_analysis',
-              tool_called: 'github_adapter',
-              reply,
-              message: reply,
-              workflows: [],
-            };
-          }
-
-          const lines = [
-            `I found ${workflows.length} GitHub Actions workflows for ${slug}:`,
-            '',
-            ...workflows.map(
-              (wf, idx) =>
-                `${idx + 1}. ${wf.name} (${wf.state}) — ${wf.path}`
-            ),
-          ];
-
-          // Enrich each workflow with a brief summary + suggestions by
-          // fetching the YAML via github_adapter (file action) and calling
-          // the LLM. This only runs in user mode and degrades gracefully
-          // if OpenAI is not configured or if any individual call fails.
-          const detailSections = [];
-          for (const wf of workflows) {
-            try {
-              const fileOuter = await callMCPTool(
-                'github_adapter',
-                { action: 'file', repo: slug, path: wf.path },
-                cookie
-              );
-              const fileBody =
-                fileOuter && typeof fileOuter === 'object' && 'data' in fileOuter
-                  ? fileOuter.data
-                  : fileOuter;
-
-              const yaml = fileBody?.file?.content || null;
-              const summary = await summarizeWorkflowYamlForUser({
-                repoSlug: slug,
-                workflowName: wf.name,
-                workflowPath: wf.path,
-                yaml,
-              });
-
-              if (summary) {
-                detailSections.push(
-                  [
-                    '',
-                    '---',
-                    `${wf.name} (${wf.state}) — ${wf.path}`,
-                    summary,
-                  ].join('\n')
-                );
-              }
-            } catch (innerErr) {
-              console.warn(
-                '⚠️ Failed to fetch or summarize workflow YAML in user mode:',
-                innerErr?.message || innerErr
-              );
-            }
-          }
-
-          const reply = [...lines, ...detailSections].join('\n');
-
-          return {
-            success: true,
-            agent_decision: 'user_workflow_analysis',
-            tool_called: 'github_adapter',
-            reply,
-            message: reply,
-            workflows,
-          };
-        }
-      }
-    } catch (e) {
-      console.warn(
-        '⚠️ User-mode workflow analysis via github_adapter failed, falling back:',
-        e?.message || e
-      );
-      // fall through to default behavior
-    }
-  }
-
-  // Pro-mode: try RAG-based workflow analysis for deep workflow questions
-  if (mode === 'pro' && repoUrlFromInput && looksLikeWorkflowAnalysis) {
-    try {
-      const ragQuestion =
-        userPromptText +
-        '\n\nFocus your answer specifically on CI/CD workflows (GitHub Actions, tests, builds, and deployments) for this repository.';
-
-      console.log('[RAG][workflow-analysis] Pro user workflow analysis request', {
-        userId: user?.user_id || user?.id,
-        repoUrl: repoUrlFromInput,
-        questionPreview: ragQuestion.slice(0, 200),
-      });
-
-      const ragResult = await askRagForWorkflows({
-        user,
-        repoUrl: repoUrlFromInput,
-        question: ragQuestion,
-        cookie,
-      });
-
-      console.log('[RAG][workflow-analysis] Query result meta', {
-        namespace: ragResult?.namespace,
-        suggestionCount: Array.isArray(ragResult?.suggestions)
-          ? ragResult.suggestions.length
-          : 0,
-        sourceCount: Array.isArray(ragResult?.sources)
-          ? ragResult.sources.length
-          : 0,
-      });
-
-      const rawAnswer = ragResult.answer || '';
-      const noWorkflowContext = /does not include any specific information about the CI\/CD workflows|cannot analyze your current workflows/i.test(
-        rawAnswer
-      );
-
-      console.log('[RAG][workflow-analysis] Answer diagnostics', {
-        noWorkflowContext,
-        answerPreview: rawAnswer.slice(0, 400),
-        sources: Array.isArray(ragResult?.sources)
-          ? ragResult.sources.map((s) => ({ path: s.path, idx: s.idx, score: s.score }))
-          : [],
-      });
-
-      const reply = noWorkflowContext
-        ? 'I couldn’t find any existing CI/CD workflows in the code I ingested for this repo. Based on general best practices, here are workflow improvements you might consider adding.'
-        : rawAnswer;
-
-      return {
-        success: true,
-        agent_decision: 'rag_workflow_analysis',
-        tool_called: 'rag_query',
-        reply,
-        message: reply,
-        suggestions: ragResult.suggestions,
-        sources: ragResult.sources,
-        rag_namespace: ragResult.namespace,
-        no_workflow_context: noWorkflowContext,
-      };
-    } catch (e) {
-      console.warn(
-        '⚠️ RAG workflow analysis failed, falling back to default agent path:',
-        e?.message || e,
-        {
-          repoUrl: repoUrlFromInput,
-          mode,
-        }
-      );
-      // fall through to normal agent behavior
-    }
-  }
-
   const systemPrompt = `
   You are the MCP Wizard Agent.
   You have full access to the following connected tools and APIs:
@@ -625,8 +213,7 @@ Tell me what you’d like to do next.
     pipeline_commit:
       /\b(yes commit|commit (the )?(pipeline|workflow|file)|apply (the )?(pipeline|workflow)|save (the )?(pipeline|workflow)|push (the )?(pipeline|workflow))\b/i,
     oidc_adapter: /\b(role|jenkins)\b/i,
-    github_adapter:
-      /\b(github|repo info|repositories?|repos?\b|repo\b|[\w-]+\/[\w-]+)\b/i,
+    github_adapter: /\b(github|repo info|repository|[\w-]+\/[\w-]+)\b/i,
   };
 
   // Short-circuit if agent_decision is "capabilities"
@@ -651,37 +238,11 @@ Tell me what you’d like to do next.
       const genericRepo = (userPromptText + ' ' + decision).match(
         /\b(?!ci\/cd\b)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/
       );
-
-      // Fallback: use repoUrl from input (slug or GitHub URL) if no repo extracted from text
-      let repoFromPayloadSlug = null;
-      const rawRepoFromPayload =
-        userPrompt?.repoUrl ||
-        userPrompt?.body?.repoUrl ||
-        null;
-      if (rawRepoFromPayload) {
-        if (/^https?:\/\//i.test(rawRepoFromPayload)) {
-          try {
-            const u = new URL(rawRepoFromPayload);
-            const parts = u.pathname
-              .replace(/^\//, '')
-              .replace(/\.git$/i, '')
-              .split('/');
-            if (parts[0] && parts[1]) {
-              repoFromPayloadSlug = `${parts[0]}/${parts[1]}`;
-            }
-          } catch {
-            // ignore URL parse failures
-          }
-        } else if (rawRepoFromPayload.includes('/')) {
-          repoFromPayloadSlug = rawRepoFromPayload;
-        }
-      }
-
       const repo =
         labeledRepo?.[1] ||
         genericRepo?.[1] ||
         pipelineSnapshot?.repo ||
-        repoFromPayloadSlug ||
+        globalThis.LAST_REPO_USED ||
         null;
 
       const labeledProvider =
@@ -836,6 +397,12 @@ Tell me what you’d like to do next.
           );
           payload.template = 'node_app';
         }
+        // --- Preserve repo context globally ---
+        if (!payload.repo && globalThis.LAST_REPO_USED) {
+          payload.repo = globalThis.LAST_REPO_USED;
+        } else if (payload.repo) {
+          globalThis.LAST_REPO_USED = payload.repo;
+        }
         // --- Add options and stages from pipelineSnapshot only ---
         if (pipelineSnapshot?.options) {
           payload.options = pipelineSnapshot.options;
@@ -852,62 +419,24 @@ Tell me what you’d like to do next.
         // Extract YAML for confirmation step (NO AI YAML merging, only backend-generated)
         const generatedYaml =
           output?.data?.data?.generated_yaml ||
-          output?.data?.generated_yaml ||
           null;
-
-        // Surface pipeline_name if the tool provided one so the UI and
-        // the user see the exact file that will be committed.
-        const pipelineNameFromTool =
-          output?.data?.data?.pipeline_name ||
-          output?.data?.pipeline_name ||
-          pipelineSnapshot?.pipeline_name ||
-          '.github/workflows/ci.yml';
-
+        // Store YAML globally for future commit step
+        globalThis.LAST_GENERATED_YAML = generatedYaml;
         // Return confirmation-required structure
         return {
           success: true,
           requires_confirmation: true,
-          reply:
-            `I generated a CI/CD workflow YAML for this repo based on your current settings. It will live at ${pipelineNameFromTool}. Review it in the UI and decide whether to commit it.`,
           message:
-            `A pipeline has been generated at ${pipelineNameFromTool}. Would you like me to commit this workflow file to your repository?`,
-          suggestions: [
-            {
-              id: 'review-yaml',
-              title: 'Review the generated workflow YAML',
-              description:
-                'Look over the proposed GitHub Actions workflow to make sure it matches your build, test, and deploy expectations before committing.',
-            },
-            {
-              id: 'test-branch',
-              title: 'Test the workflow on a staging or feature branch',
-              description:
-                'Commit this workflow to a non-main branch first to validate that builds, tests, and deployments behave as expected.',
-            },
-          ],
+            'A pipeline has been generated. Would you like me to commit this workflow file to your repository?',
           agent_decision: agentMeta.agent_decision,
           tool_called: agentMeta.tool_called,
           generated_yaml: generatedYaml,
-          pipeline_metadata: {
-            ...output,
-            pipeline_name: pipelineNameFromTool,
-          },
+          pipeline_metadata: output,
         };
       }
 
       if (toolName === 'pipeline_commit') {
         console.log('📝 Commit intent detected.');
-
-        // Guard: copilot path is read-only and must not commit directly
-        if (!allowPipelineCommit) {
-          return {
-            success: false,
-            agent_decision: agentMeta.agent_decision,
-            tool_called: null,
-            message:
-              'I can help you design and refine the workflow YAML, but committing it to your repo is handled by the UI.',
-          };
-        }
 
         // ❗ Guard: Prevent confusing "repo commit history" with "pipeline commit"
         if (
@@ -920,7 +449,7 @@ Tell me what you’d like to do next.
           );
           agentMeta.tool_called = 'github_adapter';
 
-          const repoForCommits = repo || pipelineSnapshot?.repo || null;
+          const repoForCommits = repo || globalThis.LAST_REPO_USED;
           if (!repoForCommits) {
             return {
               success: false,
@@ -944,7 +473,7 @@ Tell me what you’d like to do next.
         }
 
         // Ensure we have a repo
-        const commitRepo = repo || pipelineSnapshot?.repo || null;
+        const commitRepo = repo || globalThis.LAST_REPO_USED;
         if (!commitRepo) {
           return {
             success: false,
@@ -957,11 +486,7 @@ Tell me what you’d like to do next.
         const yamlMatch = userPromptText.match(/```yaml([\s\S]*?)```/i);
         const yamlFromPrompt = yamlMatch ? yamlMatch[1].trim() : null;
 
-        const yaml =
-          yamlFromPrompt ||
-          pipelineSnapshot?.generated_yaml ||
-          pipelineSnapshot?.yaml ||
-          null;
+        const yaml = yamlFromPrompt || globalThis.LAST_GENERATED_YAML || null;
 
         if (!yaml) {
           return {
@@ -970,6 +495,9 @@ Tell me what you’d like to do next.
               'I don’t have a pipeline YAML to commit. Please generate one first.',
           };
         }
+
+        // Save YAML globally for future edits
+        globalThis.LAST_GENERATED_YAML = yaml;
 
         const commitPayload = {
           repoFullName: commitRepo,
@@ -1105,39 +633,6 @@ Tell me what you’d like to do next.
         };
       }
     }
-  }
-
-  // If no MCP tool matched, but the LLM decision looks like a
-  // direct natural-language answer (not a tool-routing plan),
-  // surface it as the reply instead of a generic error.
-  const natural = (agentMeta.agent_decision || '').trim();
-
-  // Special-case: user asking to remove deploy after a pipeline
-  // was generated. The frontend already toggles stages + regenerates
-  // YAML; here we just confirm what happened.
-  if (/remove (the )?deploy(ment)?|no deploy|without deploy|i don['’]t want the deploy/i.test(userPromptText)) {
-    const reply =
-      'I turned off the deploy stage for this pipeline. The YAML below has been regenerated without the deploy job; review it before committing.';
-    return {
-      success: true,
-      agent_decision: agentMeta.agent_decision,
-      tool_called: null,
-      reply,
-      message: reply,
-    };
-  }
-  const looksLikeToolPlan = /\b(repo_reader|pipeline_generator|pipeline_commit|github_adapter|oidc_adapter)\b/i.test(
-    natural
-  );
-
-  if (natural && !looksLikeToolPlan) {
-    return {
-      success: true,
-      agent_decision: agentMeta.agent_decision,
-      tool_called: null,
-      reply: natural,
-      message: natural,
-    };
   }
 
   return {
