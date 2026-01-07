@@ -7,6 +7,26 @@ import { savePipelineVersion } from '../lib/pipelineVersions.js';
 
 const router = Router();
 
+// Response helpers to normalize envelope + request_id
+const ok = (req, res, status, data = null, message = undefined) =>
+  res
+    .status(status)
+    .json({ ok: true, data, message, request_id: req.requestId });
+
+const errRes = (
+  req,
+  res,
+  status,
+  code,
+  message,
+  details = undefined
+) =>
+  res.status(status).json({
+    ok: false,
+    error: { code, message, details },
+    request_id: req.requestId,
+  });
+
 // Helper to normalize repoUrl | repoFullName
 function normalizeRepo(repoUrlSlug) {
   if (repoUrlSlug && !repoUrlSlug.startsWith('http')) return repoUrlSlug;
@@ -58,26 +78,38 @@ router.post('/pipeline_commit', requireSession, async (req, res) => {
     // }
 
     if (!repoFullName && !repoUrl) {
-      return res.status(400).json({
-        ok: false,
-        error: 'Missing required field: repoFullName or repoUrl',
-      });
+      return errRes(
+        req,
+        res,
+        400,
+        'BAD_REQUEST',
+        'Missing required field: repoFullName or repoUrl'
+      );
     }
 
     if (!yaml) {
-      return res.status(400).json({
-        ok: false,
-        error: 'Missing required field: yaml',
-      });
+      return errRes(req, res, 400, 'BAD_REQUEST', 'Missing required field: yaml');
     }
 
     const userId = req.user?.user_id;
     if (!userId)
-      return res.status(401).json({ error: 'User session missing or invalid' });
+      return errRes(
+        req,
+        res,
+        401,
+        'UNAUTHORIZED',
+        'User session missing or invalid'
+      );
 
     const token = await getGithubAccessTokenForUser(userId);
     if (!token)
-      return res.status(401).json({ error: 'Missing GitHub token for user' });
+      return errRes(
+        req,
+        res,
+        401,
+        'UNAUTHORIZED',
+        'Missing GitHub token for user'
+      );
 
     // const [owner, repo] = repoFullName.split('/');
     let normalizedRepoFullName;
@@ -85,7 +117,7 @@ router.post('/pipeline_commit', requireSession, async (req, res) => {
     try {
       normalizedRepoFullName = normalizeRepo(repoFullName || repoUrl);
     } catch (e) {
-      return res.status(400).json({ ok: false, error: e.message });
+      return errRes(req, res, 400, 'BAD_REQUEST', e.message);
     }
 
     const [owner, repo] = normalizedRepoFullName.split('/');
@@ -156,17 +188,18 @@ router.post('/pipeline_commit', requireSession, async (req, res) => {
       source: 'pipeline_commit',
     });
 
-    return res.status(201).json({
-      ok: true,
-      message: 'Workflow committed successfully',
-      data: result,
-    });
+    return ok(req, res, 201, result, 'Workflow committed successfully');
   } catch (err) {
     console.error('[pipeline_commit] error:', err);
     const status = err.status || 500;
-    return res
-      .status(status)
-      .json({ error: err.message, details: err.details || undefined });
+    return errRes(
+      req,
+      res,
+      status,
+      err.code || (status >= 500 ? 'INTERNAL' : 'ERROR'),
+      err.message,
+      err.details || undefined
+    );
   }
 });
 
@@ -188,14 +221,24 @@ router.get('/pipeline_history', requireSession, async (req, res) => {
     const { repoFullName, branch, path, limit } = req.query || {};
 
     if (!repoFullName) {
-      return res
-        .status(400)
-        .json({ error: 'repoFullName query param is required' });
+      return errRes(
+        req,
+        res,
+        400,
+        'BAD_REQUEST',
+        'repoFullName query param is required'
+      );
     }
 
     const userId = req.user?.user_id;
     if (!userId) {
-      return res.status(401).json({ error: 'User session missing or invalid' });
+      return errRes(
+        req,
+        res,
+        401,
+        'UNAUTHORIZED',
+        'User session missing or invalid'
+      );
     }
 
     const branchName = branch || 'main';
@@ -224,16 +267,18 @@ router.get('/pipeline_history', requireSession, async (req, res) => {
       [repoFullName, branchName, workflowPath, lim]
     );
 
-    return res.json({
-      ok: true,
-      versions: rows,
-    });
+    return ok(req, res, 200, { versions: rows });
   } catch (err) {
     console.error('[pipeline_history] error: ', err);
     const status = err.status || 500;
-    return res.status(status).json({
-      error: err.message || 'Failed to fetch the pipeline commit history',
-    });
+    return errRes(
+      req,
+      res,
+      status,
+      err.code || (status >= 500 ? 'INTERNAL' : 'ERROR'),
+      err.message || 'Failed to fetch the pipeline commit history',
+      err.details || undefined
+    );
   }
 });
 
@@ -254,14 +299,24 @@ router.post('/pipeline_rollback', requireSession, async (req, res) => {
   try {
     const { versionId } = req.body || {};
     if (!versionId) {
-      return res
-        .status(400)
-        .json({ error: 'Missing versionId from request body' });
+      return errRes(
+        req,
+        res,
+        400,
+        'BAD_REQUEST',
+        'Missing versionId from request body'
+      );
     }
 
     const userId = req.user?.user_id;
     if (!userId) {
-      return res.status(401).json({ error: 'User session missing or invalid' });
+      return errRes(
+        req,
+        res,
+        401,
+        'UNAUTHORIZED',
+        'User session missing or invalid'
+      );
     }
 
     // Look up the pipeline version we want to restore
@@ -286,9 +341,13 @@ router.post('/pipeline_rollback', requireSession, async (req, res) => {
     );
 
     if (!versionResult.rowCount || !versionResult.rows.length) {
-      return res
-        .status(404)
-        .json({ error: 'Pipeline version not found for give versionId' });
+      return errRes(
+        req,
+        res,
+        404,
+        'NOT_FOUND',
+        'Pipeline version not found for give versionId'
+      );
     }
 
     const version = versionResult.rows[0];
@@ -302,16 +361,24 @@ router.post('/pipeline_rollback', requireSession, async (req, res) => {
     // Get github token for this user
     const token = await getGithubAccessTokenForUser(userId);
     if (!token) {
-      return res
-        .status(401)
-        .json({ error: 'Missing GitHub token for this user' });
+      return errRes(
+        req,
+        res,
+        401,
+        'UNAUTHORIZED',
+        'Missing GitHub token for this user'
+      );
     }
 
     const [owner, repo] = (repoFullName || '').split('/');
     if (!owner || !repo) {
-      return res
-        .status(400)
-        .json({ error: `Invalid repo_full_name on version ${versionId}` });
+      return errRes(
+        req,
+        res,
+        400,
+        'BAD_REQUEST',
+        `Invalid repo_full_name on version ${versionId}`
+      );
     }
 
     //Re-commit the yaml file to GitHub (overwrite current workflow)
@@ -366,21 +433,24 @@ router.post('/pipeline_rollback', requireSession, async (req, res) => {
       source: 'pipeline_rollback',
     });
 
-    return res.status(201).json({
-      ok: true,
-      message: 'Pipeline rolled back successfully',
-      data: {
-        github: githubResult,
-        deployment,
-      },
-    });
+    return ok(
+      req,
+      res,
+      201,
+      { github: githubResult, deployment },
+      'Pipeline rolled back successfully'
+    );
   } catch (err) {
     console.error('[pipeline_rollback] error:', err);
     const status = err.status || 500;
-    return res.status(status).json({
-      error: err.message || 'Failed to rollback pipeline',
-      details: err.details || undefined,
-    });
+    return errRes(
+      req,
+      res,
+      status,
+      err.code || (status >= 500 ? 'INTERNAL' : 'ERROR'),
+      err.message || 'Failed to rollback pipeline',
+      err.details || undefined
+    );
   }
 });
 

@@ -10,11 +10,16 @@ import { pipeline_generator } from '../tools/pipeline_generator.js';
 import { repo_reader } from '../tools/repo_reader.js';
 import { oidc_adapter } from '../tools/oidc_adapter.js';
 import { requireSession } from '../lib/requireSession.js';
+import { Actions, requireCapability, isPro } from '../lib/authorization.js';
 
 const router = express.Router();
 
 // Trigger full pipeline wizard (MVP agent)
-router.post('/wizard', requireSession, async (req, res) => {
+router.post(
+  '/wizard',
+  requireSession,
+  requireCapability(Actions.USE_AGENT),
+  async (req, res) => {
   try {
     const { repoUrl, provider, branch } = req.body;
     if (!repoUrl || !provider || !branch) {
@@ -23,12 +28,21 @@ router.post('/wizard', requireSession, async (req, res) => {
         error: 'Missing required fields: repoUrl, provider, branch',
       });
     }
-    const result = await runWizardAgent({
-      repoUrl,
-      provider,
-      branch,
-      cookie: req.headers.cookie,
-    });
+    const user = req.user;
+    const mode = isPro(user) ? 'pro' : 'user';
+    const result = await runWizardAgent(
+      {
+        repoUrl,
+        provider,
+        branch,
+        cookie: req.headers.cookie,
+      },
+      {
+        mode,
+        user,
+        allowPipelineCommit: true,
+      }
+    );
     res.json({ success: true, data: result });
   } catch (err) {
     console.error('Wizard Error:', err);
@@ -36,8 +50,11 @@ router.post('/wizard', requireSession, async (req, res) => {
   }
 });
 
-// Trigger wizard agent with AI prompt
-router.post('/wizard/ai', requireSession, async (req, res) => {
+// Trigger wizard agent with AI prompt (Workflow Copilot)
+router.post(
+  '/wizard/ai',
+  requireSession,
+  async (req, res) => {
   try {
     const {
       prompt,
@@ -53,24 +70,37 @@ router.post('/wizard/ai', requireSession, async (req, res) => {
         .json({ success: false, error: 'Missing required field: prompt' });
     }
 
-    console.log('🧠 Wizard AI request received:', {
+    const user = req.user;
+    const mode = isPro(user) ? 'pro' : 'user';
+
+    console.log('🧠 Workflow Copilot request:', {
+      mode,
       repoUrl,
       provider,
       branch,
       hasPipelineSnapshot: !!pipelineSnapshot,
       snapshotKeys: pipelineSnapshot ? Object.keys(pipelineSnapshot) : [],
+      requestId: req.requestId,
     });
 
-    const result = await runWizardAgent({
-      prompt,
-      repoUrl,
-      provider,
-      branch,
-      pipelineSnapshot,
-      cookie: req.headers.cookie,
-    });
+    const result = await runWizardAgent(
+      {
+        prompt,
+        repoUrl,
+        provider,
+        branch,
+        pipelineSnapshot,
+        cookie: req.headers.cookie,
+      },
+      {
+        mode,
+        user,
+        allowPipelineCommit: false,
+      }
+    );
 
-    res.json({ success: true, data: result });
+    // Keep response shape compatible with existing frontend: data is the result object.
+    res.json({ success: true, data: { ...result, mode } });
   } catch (err) {
     console.error('Wizard AI Error:', err);
     res.status(500).json({ success: false, error: err.message });

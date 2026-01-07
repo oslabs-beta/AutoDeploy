@@ -8,6 +8,14 @@ import { github_adapter } from './github_adapter.js';
 import { gcp_adapter } from './gcp_adapter.js';
 import { scaffold_generator } from './scaffold_generator.js'; // Dockerfile generator
 
+// Local RAG tools (Pinecone + Supabase via AutoDeploy backend)
+import {
+  rag_ingest_zip,
+  rag_ingest_github,
+  rag_query_namespace,
+  rag_get_logs,
+} from './askmyrepo_rag.js';
+
 export const MCP_TOOLS = {
   repo: repo_reader,
   repo_reader: repo_reader,
@@ -21,6 +29,12 @@ export const MCP_TOOLS = {
   gcp_adapter: gcp_adapter,
   scaffold: scaffold_generator,
   scaffold_generator: scaffold_generator,
+
+  // AskMyRepo RAG tools
+  rag_ingest_zip: rag_ingest_zip,
+  rag_ingest_github: rag_ingest_github,
+  rag_query_namespace: rag_query_namespace,
+  rag_get_logs: rag_get_logs,
 };
 
 // Optional helper for dynamic access

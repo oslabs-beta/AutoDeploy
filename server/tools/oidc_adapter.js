@@ -4,6 +4,10 @@ export const oidc_adapter = {
   name: "oidc_adapter",
   description: "List available AWS IAM roles or Jenkins jobs for a given provider.",
   
+  // TODO(paython): this entire tool currently returns mock data and must be
+  // replaced with real AWS/Jenkins discovery or a config-backed registry
+  // before being relied on in production flows.
+  
   // ✅ Input schema for validation
   input_schema: z.object({
     provider: z.enum(["aws", "jenkins", "gcp"]),

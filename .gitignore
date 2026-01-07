@@ -153,4 +153,23 @@ jenkins.pem
 # Local change log (Chinese summary)
 change_log_cn.md
 
+# Ignore all Markdown files, except root README.md and client/README.md
+*.md
+**/*.md
+!README.md
+!client/README.md
+
+# Explicitly ignore selected Markdown docs even though they match the above patterns
 WARP.md
+BACKEND_FLOWS.md
+FRONTEND_COLORS.md
+FRONTEND_FLOWS.md
+AUTH.md
+
+# Local backend design docs (ignored from git)
+server/readme/
+
+*.pptx
+
+# Read Me
+readme/*

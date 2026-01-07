@@ -17,6 +17,8 @@ export default function ConnectPage() {
     branches,
     repo,
     branch,
+    loading,
+    connected,
     setRepo,
     setBranch,
     loadRepos,
@@ -28,9 +30,29 @@ export default function ConnectPage() {
     window.location.href = "http://localhost:3000/auth/github/start";
   };
 
+  // On first load, hydrate the user session.
   useEffect(() => {
     void refreshMe();
-  }, []);
+  }, [refreshMe]);
+
+  // After we know the user, automatically load repos and (if needed) branches
+  // so that "Continue to Configure" is ready with minimal clicks.
+  useEffect(() => {
+    if (!user || loading) return;
+
+    // Always ensure repos are loaded when the list is empty.
+    // `api.listRepos` has its own in-memory cache, so repeat calls are cheap.
+    if (!repos.length) {
+      void loadRepos();
+      return;
+    }
+
+    // If we already have a repo selected (from localStorage) but no branches
+    // in memory yet, hydrate them so branch + Continue are ready.
+    if (repo && !branches.length) {
+      void loadBranches(repo);
+    }
+  }, [user, repos.length, repo, branches.length, loading, loadRepos, loadBranches]);
 
   return (
     <div className="max-w-3xl mx-auto p-6 mt-10">

@@ -12,16 +12,21 @@ import meRouter from './routes/me.js';
 import authAws from './routes/auth.aws.js';
 import authGoogle from './routes/auth.google.js';
 import mcpRouter from './routes/mcp.js';
+import mcpV2Router from './routes/mcp.v2.js';
 import agentRouter from './routes/agent.js';
 import githubAuthRouter from './routes/auth.github.js';
 import deploymentsRouter from './routes/deployments.js';
 import authRouter from './routes/authRoutes.js';
 import localAuthRouter from './routes/auth.local.js';
 import userRouter from './routes/usersRoutes.js';
+import systemBannerRouter from './routes/systemBanner.js';
+import connectionsStatusRouter from './routes/connectionsStatus.js';
 import pipelineCommitRouter from './routes/pipelineCommit.js';
 import pipelineSessionsRouter from './routes/pipelineSessions.js';
 import scaffoldCommitRouter from './routes/scaffoldCommit.js';
 import workflowCommitRouter from './routes/workflowCommit.js';
+import ragRouter from './routes/rag.js';
+import githubSecretsRouter from './routes/githubSecrets.js';
 // app.use(authRoutes);
 import jenkinsRouter from './routes/jenkins.js';
 
@@ -35,6 +40,18 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(helmet());
 app.use(morgan('dev'));
 app.use(cookieParser());
+
+// --- Request ID Middleware ---
+// Generates a lightweight request ID for traceability and surfaces it to clients.
+app.use((req, res, next) => {
+  req.requestId =
+    req.headers['x-request-id'] ||
+    `req_${Date.now().toString(36)}${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
+  res.setHeader('x-request-id', req.requestId);
+  next();
+});
 
 // --- Request Logging Middleware ---
 app.use((req, _res, next) => {
@@ -62,7 +79,25 @@ app.get('/db/ping', async (_req, res) => {
 });
 
 // Routes
-app.use('/api', meRouter);
+app.use("/api", meRouter);
+app.use("/api", systemBannerRouter);
+app.use('/api', connectionsStatusRouter);
+app.use('/api/rag', ragRouter);
+// Admin-ish user management routes (all of these are now authz-protected
+// inside usersRoutes.js using MANAGE_USERS capability).
+
+// --- Request ID Middleware ---
+// Generates a lightweight request ID for traceability and surfaces it to clients.
+app.use((req, res, next) => {
+  req.requestId =
+    req.headers['x-request-id'] ||
+    `req_${Date.now().toString(36)}${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
+  res.setHeader('x-request-id', req.requestId);
+  next();
+});
+
 app.use('/', userRouter);
 app.use('/deployments', deploymentsRouter);
 app.use('/agent', agentRouter);
@@ -70,6 +105,7 @@ app.use('/mcp/v1', pipelineCommitRouter);
 app.use('/mcp/v1', mcpRouter);
 app.use('/mcp/v1', scaffoldCommitRouter);
 app.use('/mcp/v1', workflowCommitRouter);
+app.use('/mcp/v2', mcpV2Router);
 app.use('/auth/local', localAuthRouter);
 app.use('/auth/github', githubAuthRouter);
 app.use(authRouter);
@@ -77,58 +113,12 @@ app.use(authRouter);
 // app.use('/auth/aws', authAws);
 app.use('/auth/google', authGoogle);
 app.use('/jenkins', jenkinsRouter);
+app.use('/api/secrets/github', githubSecretsRouter);
 app.use('/pipeline-sessions', pipelineSessionsRouter);
 
-/** Users */
-const UserBody = z.object({
-  email: z.string().email(),
-  github_username: z.string().min(1).optional(),
-});
-
-// Create or upsert user by email
-app.post('/users', async (req, res) => {
-  const parse = UserBody.safeParse(req.body);
-  if (!parse.success)
-    return res.status(400).json({ error: parse.error.message });
-  const { email, github_username } = parse.data;
-
-  // upsert on email; requires a unique index on users.email
-  try {
-    const rows = await query(
-      `
-      insert into users (email, github_username)
-      values ($1, $2)
-      on conflict (email) do update set github_username = excluded.github_username
-      returning *;
-      `,
-      [email, github_username ?? null]
-    );
-    res.status(201).json({ user: rows[0] });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.get('/users', async (_req, res) => {
-  try {
-    const rows = await query(`
-      select 
-        u.id as user_id,
-        u.email,
-        u.github_username,
-        c.provider,
-        c.access_token,
-        c.created_at
-      from users u  
-      left join connections c on u.id = c.user_id
-      order by c.created_at desc
-      limit 100;
-    `);
-    res.json({ users: rows });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
+// Legacy inline /users endpoints have been superseded by routes/usersRoutes.js,
+// which now includes authz and a small admin API for promoting users. Keeping
+// everything user-related in that router keeps server.js lighter.
 
 app.get('/connections', async (_req, res) => {
   try {

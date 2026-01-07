@@ -1,8 +1,12 @@
 import express from 'express';
 import { MCP_TOOLS } from '../tools/index.js';
 import { requireSession } from '../lib/requireSession.js';
+import { Actions, requireCapability } from '../lib/authorization.js';
+import { ApiError, sendErrorV1, sendSuccessV1 } from '../lib/httpEnvelope.js';
 
 const router = express.Router();
+
+
 
 // Utility logger
 const logRequest = (req, route) => {
@@ -17,22 +21,34 @@ const logRequest = (req, route) => {
 router.get('/status', (req, res) => {
   logRequest(req, '/mcp/v1/status');
 
-  res.json({
+  // v1 is kept for backwards compatibility. Prefer /mcp/v2 for new clients.
+  res.setHeader('Deprecation', 'true');
+  res.setHeader('Link', '</mcp/v2/status>; rel="successor-version"');
+
+  sendSuccessV1(req, res, {
     status: 'ok',
     version: 'v1.0.0',
+    deprecated: true,
+    successor: { base: '/mcp/v2', status: '/mcp/v2/status', tools: '/mcp/v2/tools' },
     tools_registered: Object.keys(MCP_TOOLS),
     timestamp: new Date().toISOString(),
   });
 });
 
 // --- GitHub adapter subcommands (explicit) ---
-router.all('/github/:action', requireSession, async (req, res) => {
+router.all(
+  '/github/:action',
+  requireSession,
+  requireCapability(Actions.USE_MCP_TOOL),
+  async (req, res) => {
   logRequest(req, `/mcp/v1/github/${req.params.action}`);
   const tool = MCP_TOOLS['github'];
   if (!tool) {
-    return res
-      .status(404)
-      .json({ success: false, error: "Tool 'github' not found." });
+    return sendErrorV1(
+      req,
+      res,
+      new ApiError({ status: 404, code: 'NOT_FOUND', message: "Tool 'github' not found." })
+    );
   }
   try {
     const input = {
@@ -44,21 +60,27 @@ router.all('/github/:action', requireSession, async (req, res) => {
     };
     const validatedInput = tool.input_schema.parse(input);
     const data = await tool.handler(validatedInput);
-    res.json({ success: true, data });
+    sendSuccessV1(req, res, data);
   } catch (error) {
     console.error(`Error in github_adapter (${req.params.action}):`, error);
-    res.status(500).json({ success: false, error: error.message });
+    return sendErrorV1(req, res, error);
   }
 });
 
 // Optional fallback: /mcp/v1/github -> default action 'repos'
-router.all('/github', requireSession, async (req, res) => {
+router.all(
+  '/github',
+  requireSession,
+  requireCapability(Actions.USE_MCP_TOOL),
+  async (req, res) => {
   logRequest(req, `/mcp/v1/github`);
   const tool = MCP_TOOLS['github'];
   if (!tool) {
-    return res
-      .status(404)
-      .json({ success: false, error: "Tool 'github' not found." });
+    return sendErrorV1(
+      req,
+      res,
+      new ApiError({ status: 404, code: 'NOT_FOUND', message: "Tool 'github' not found." })
+    );
   }
   try {
     const input = {
@@ -70,15 +92,19 @@ router.all('/github', requireSession, async (req, res) => {
     };
     const validatedInput = tool.input_schema.parse(input);
     const data = await tool.handler(validatedInput);
-    res.json({ success: true, data });
+    sendSuccessV1(req, res, data);
   } catch (error) {
     console.error(`Error in github_adapter (default):`, error);
-    res.status(500).json({ success: false, error: error.message });
+    return sendErrorV1(req, res, error);
   }
 });
 
 // Dynamic route: handles any tool in registry
-router.all('/:tool_name', requireSession, async (req, res) => {
+router.all(
+  '/:tool_name',
+  requireSession,
+  requireCapability(Actions.USE_MCP_TOOL),
+  async (req, res) => {
   const { tool_name } = req.params;
   const tool = MCP_TOOLS[tool_name];
   logRequest(req, `/mcp/v1/${tool_name}`);
@@ -93,9 +119,11 @@ router.all('/:tool_name', requireSession, async (req, res) => {
   }
 
   if (!tool) {
-    return res
-      .status(404)
-      .json({ success: false, error: `Tool '${tool_name}' not found.` });
+    return sendErrorV1(
+      req,
+      res,
+      new ApiError({ status: 404, code: 'NOT_FOUND', message: `Tool '${tool_name}' not found.` })
+    );
   }
 
   try {
@@ -108,10 +136,10 @@ router.all('/:tool_name', requireSession, async (req, res) => {
     };
     const validatedInput = tool.input_schema.parse(input);
     const data = await tool.handler(validatedInput);
-    res.json({ success: true, data });
+    sendSuccessV1(req, res, data);
   } catch (error) {
     console.error(`Error in ${tool_name}:`, error);
-    res.status(500).json({ success: false, error: error.message });
+    return sendErrorV1(req, res, error);
   }
 });
 
