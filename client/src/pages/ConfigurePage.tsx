@@ -1064,6 +1064,7 @@ export default function ConfigurePage() {
               >
                 Propose CI pipeline
               </button>
+            </div>
             <div className="flex-1 min-h-[360px] max-h-[576px] overflow-y-auto rounded-md border border-white/20 bg-white/5 px-3 py-2 space-y-2">
               {chatMessages.map((m, idx) => (
                 <div
