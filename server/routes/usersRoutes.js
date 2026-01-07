@@ -21,7 +21,7 @@ router.post('/users', requireSession, requireCapability(Actions.MANAGE_USERS), a
 
   // upsert on email; requires a unique index on users.email
   try {
-    const rows = await query(
+    const { rows } = await query(
       `
       insert into users (email, github_username)
       values ($1, $2)
@@ -38,7 +38,7 @@ router.post('/users', requireSession, requireCapability(Actions.MANAGE_USERS), a
 
 router.get('/users', requireSession, requireCapability(Actions.MANAGE_USERS), async (_req, res) => {
   try {
-    const rows = await query(
+    const { rows } = await query(
       `select * from users order by created_at desc limit 100;`
     );
     res.json({ users: rows });
@@ -68,7 +68,7 @@ router.post(
     const role = make_admin ? 'SYSTEM_ADMIN' : 'USER';
 
     try {
-      const rows = await query(
+      const { rows } = await query(
         `
         update users
         set role = $2
@@ -76,6 +76,50 @@ router.post(
         returning id, email, github_username, role, plan, beta_pro_granted, created_at;
         `,
         [user_id, role]
+      );
+
+      if (!rows.length) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      return res.json({ user: rows[0] });
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  }
+);
+
+// Toggle a user's Pro plan on/off. This is used by the landing Admin console
+// to grant or revoke Pro access.
+const ProBody = z.object({
+  user_id: z.string().uuid(),
+  make_pro: z.boolean().default(true),
+});
+
+router.post(
+  '/users/pro',
+  requireSession,
+  requireCapability(Actions.MANAGE_USERS),
+  async (req, res) => {
+    const parsed = ProBody.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.message });
+    }
+
+    const { user_id, make_pro } = parsed.data;
+    const plan = make_pro ? 'pro' : 'free';
+    const betaProGranted = make_pro ? true : false;
+
+    try {
+      const { rows } = await query(
+        `
+        update users
+        set plan = $2,
+            beta_pro_granted = $3
+        where id = $1
+        returning id, email, github_username, role, plan, beta_pro_granted, created_at;
+        `,
+        [user_id, plan, betaProGranted]
       );
 
       if (!rows.length) {
