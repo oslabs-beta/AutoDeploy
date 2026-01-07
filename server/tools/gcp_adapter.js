@@ -14,6 +14,9 @@ const inputSchema = z.object({
   repo: z.string().optional(),
   branch: z.string().default('main'),
 
+  // Enabled stages (used to include/exclude jobs in the generated workflow)
+  stages: z.array(z.enum(['build', 'test', 'deploy'])).default(['build', 'deploy']),
+
   // Provider config (prefer secrets at runtime)
   gcp_project_id: z.string().default('${{ secrets.GCP_PROJECT_ID }}'),
   gcp_region: z.string().default('${{ secrets.GCP_REGION }}'),
@@ -65,6 +68,7 @@ export const gcp_adapter = {
 
     const {
       branch,
+      stages,
       gcp_project_id,
       gcp_region,
       workload_identity_provider,
@@ -84,48 +88,11 @@ export const gcp_adapter = {
       generate_dockerfiles,
     } = input;
 
-    const yaml = `name: CI/CD (GCP Cloud Run)
+    const includeDeploy = stages.includes('deploy');
+    const includeBuild = stages.includes('build') || includeDeploy;
 
-on:
-  push:
-    branches:
-      - ${branch}
-  pull_request:
-    branches:
-      - ${branch}
-
-permissions:
-  contents: read
-  packages: write
-  id-token: write
-
-env:
-  GCP_REGION: ${gcp_region}
-  GCP_PROJECT_ID: ${gcp_project_id}
-
-  BACKEND_SERVICE: ${backend_service}
-  FRONTEND_SERVICE: ${frontend_service}
-
-  BACKEND_AR_REPO: ${backend_ar_repo}
-  FRONTEND_AR_REPO: ${frontend_ar_repo}
-
-  BACKEND_IMAGE_NAME: ${backend_image_name}
-  FRONTEND_IMAGE_NAME: ${frontend_image_name}
-
-  # Option A: repo layout (docker build context + dockerfile paths)
-  BACKEND_CONTEXT: "${backend_context}"
-  BACKEND_DOCKERFILE_PATH: "${backend_dockerfile}"
-  BACKEND_PORT: "${backend_port}"
-
-  FRONTEND_CONTEXT: "${frontend_context}"
-  FRONTEND_DOCKERFILE_PATH: "${frontend_dockerfile}"
-  FRONTEND_PORT: "${frontend_port}"
-
-  # If true, the workflow will create Dockerfiles at the paths above (only if missing)
-  GENERATE_DOCKERFILES: "${generate_dockerfiles ? 'true' : 'false'}"
-
-jobs:
-  build-backend:
+    const buildJobs = includeBuild
+      ? `  build-backend:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -246,11 +213,18 @@ jobs:
         run: |
           docker push "$FRONTEND_GHCR:${gha('github.sha')}"
           docker push "$FRONTEND_GHCR:latest"
+`
+      : '';
 
+    const deployJobs = includeDeploy
+      ? `
   deploy-backend:
     needs: build-backend
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Compute lowercase owner
         id: vars
         shell: bash
@@ -327,6 +301,9 @@ jobs:
     needs: build-frontend
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Compute lowercase owner
         id: vars
         shell: bash
@@ -398,7 +375,54 @@ jobs:
             --platform managed \\
             --allow-unauthenticated \\
             --port ${gha('env.FRONTEND_PORT')}
+`
+      : '';
+
+    const yaml = `name: CI/CD (GCP Cloud Run)
+
+on:
+  push:
+    branches:
+      - ${branch}
+  pull_request:
+    branches:
+      - ${branch}
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+env:
+  GCP_REGION: ${gcp_region}
+  GCP_PROJECT_ID: ${gcp_project_id}
+
+  BACKEND_SERVICE: ${backend_service}
+  FRONTEND_SERVICE: ${frontend_service}
+
+  BACKEND_AR_REPO: ${backend_ar_repo}
+  FRONTEND_AR_REPO: ${frontend_ar_repo}
+
+  BACKEND_IMAGE_NAME: ${backend_image_name}
+  FRONTEND_IMAGE_NAME: ${frontend_image_name}
+
+  # Option A: repo layout (docker build context + dockerfile paths)
+  BACKEND_CONTEXT: "${backend_context}"
+  BACKEND_DOCKERFILE_PATH: "${backend_dockerfile}"
+  BACKEND_PORT: "${backend_port}"
+
+  FRONTEND_CONTEXT: "${frontend_context}"
+  FRONTEND_DOCKERFILE_PATH: "${frontend_dockerfile}"
+  FRONTEND_PORT: "${frontend_port}"
+
+  # If true, the workflow will create Dockerfiles at the paths above (only if missing)
+  GENERATE_DOCKERFILES: "${generate_dockerfiles ? 'true' : 'false'}"
+
+jobs:
+${buildJobs}${deployJobs}
 `;
+
+    const effectiveStages = includeDeploy ? ['build', 'deploy'] : ['build'];
 
     return {
       success: true,
@@ -406,7 +430,7 @@ jobs:
         pipeline_name: 'gcp-cloud-run-ci.yml',
         provider: 'gcp',
         template: 'node_app',
-        stages: ['build', 'deploy'],
+        stages: effectiveStages,
         generated_yaml: yaml,
       },
     };

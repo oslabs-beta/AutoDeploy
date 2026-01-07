@@ -27,6 +27,8 @@ type ChatMessage = {
 export default function ConfigurePage() {
   const { repo, branch } = useRepoStore();
 
+  const [showGcpAdvanced, setShowGcpAdvanced] = useState(false);
+
   const {
     template,
     stages,
@@ -360,7 +362,7 @@ export default function ConfigurePage() {
 
   return (
     <div className="min-h-screen text-slate-100">
-      <div className="max-w-6xl mx-auto p-6 space-y-8">
+      <div className="max-w-screen-2xl mx-auto p-6 space-y-8">
         {/* Header */}
         <header className="space-y-1">
           <h1 className="text-3xl font-semibold tracking-tight text-white">
@@ -380,7 +382,7 @@ export default function ConfigurePage() {
         </header>
 
         {/* Top grid: Config form (left) + AI wizard (right) */}
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className="grid gap-6 lg:grid-cols-[1.8fr_1.8fr]">
           {/* ===== Left: Config form ===== */}
           <section className="space-y-6 rounded-2xl border border-white/20 bg-white/10 backdrop-blur-md shadow-glass p-6 text-white">
             {/* Existing workflows selector (read-only YAML import) */}
@@ -503,22 +505,54 @@ export default function ConfigurePage() {
             <fieldset className="space-y-2">
               <legend className="text-sm font-medium text-white">Enabled stages</legend>
               <div className="flex flex-wrap gap-3">
-                {(["build", "test", "deploy"] as const).map((stage) => (
-                  <label
-                    key={stage}
-                    className="inline-flex items-center gap-2 text-sm"
-                  >
-                    <input
-                      type="checkbox"
-                      disabled={busy}
-                      checked={toggleStageChecked(stage)}
-                      onChange={() => toggleStage(stage)}
-                      className="h-4 w-4 rounded border-white/40 bg-white/10"
-                    />
-                    <span className="capitalize">{stage}</span>
-                  </label>
-                ))}
+                {(["build", "test", "deploy"] as const).map((stage) => {
+                  const checked = toggleStageChecked(stage);
+                  const testDisabledForGcp = provider === "gcp" && stage === "test";
+
+                  return (
+                    <label
+                      key={stage}
+                      className={
+                        "inline-flex items-center gap-2 text-sm " +
+                        (testDisabledForGcp ? "opacity-60" : "")
+                      }
+                    >
+                      <input
+                        type="checkbox"
+                        disabled={busy || testDisabledForGcp}
+                        checked={checked}
+                        onChange={() => {
+                          // Keep stage combinations valid.
+                          // - Deploy requires Build
+                          // - Disabling Build disables Deploy
+                          if (stage === "deploy" && !checked) {
+                            if (!stages.includes("build")) toggleStage("build");
+                            toggleStage("deploy");
+                            return;
+                          }
+
+                          if (stage === "build" && checked) {
+                            if (stages.includes("deploy")) toggleStage("deploy");
+                            toggleStage("build");
+                            return;
+                          }
+
+                          toggleStage(stage);
+                        }}
+                        className="h-4 w-4 rounded border-white/40 bg-white/10"
+                      />
+                      <span className="capitalize">{stage}</span>
+                    </label>
+                  );
+                })}
               </div>
+              {provider === "gcp" && (
+                <div className="text-xs text-slate-200">
+                  Note: the GCP Cloud Run workflow currently supports Build +
+                  Deploy stages. Test stage is handled by the generic pipeline
+                  generator (AWS path) and will be added to GCP later.
+                </div>
+              )}
             </fieldset>
 
             {/* Runtime version + commands */}
@@ -678,23 +712,288 @@ export default function ConfigurePage() {
             )}
 
             {provider === "gcp" && (
-              <label className="grid gap-1">
-                <span className="text-sm font-medium">
-                  GCP Service Account Email
-                </span>
-                <input
-                  disabled={busy}
-                  value={options.gcpServiceAccountEmail ?? ""}
-                  onChange={(e) =>
-                    setOption("gcpServiceAccountEmail", e.target.value)
-                  }
-                  className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
-                  placeholder="service-account@project.iam.gserviceaccount.com"
-                />
-                <span className="text-xs text-slate-200">
-                  Provide the service account that should run deployments.
-                </span>
-              </label>
+              <div className="grid gap-4">
+                <div className="rounded-lg border border-white/15 bg-white/5 p-4">
+                  <div className="mb-2">
+                    <div className="text-sm font-medium text-white">
+                      GCP Cloud Run settings (optional per-repo overrides)
+                    </div>
+                    <div className="text-xs text-slate-200">
+                      These values are written into the generated workflow YAML.
+                      If left blank, the workflow will read the corresponding
+                      GitHub Actions secrets at runtime (recommended).
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3">
+                    <label className="grid gap-1">
+                      <span className="text-sm font-medium">GCP Project ID</span>
+                      <input
+                        disabled={busy}
+                        value={options.gcpProjectId ?? ""}
+                        onChange={(e) => setOption("gcpProjectId", e.target.value)}
+                        className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                        placeholder="my-gcp-project"
+                      />
+                    </label>
+
+                    <label className="grid gap-1">
+                      <span className="text-sm font-medium">GCP Region</span>
+                      <input
+                        disabled={busy}
+                        value={options.gcpRegion ?? ""}
+                        onChange={(e) => setOption("gcpRegion", e.target.value)}
+                        className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                        placeholder="us-central1"
+                      />
+                    </label>
+
+                    <label className="grid gap-1">
+                      <span className="text-sm font-medium">
+                        Workload Identity Provider (WIF)
+                      </span>
+                      <input
+                        disabled={busy}
+                        value={options.gcpWorkloadIdentityProvider ?? ""}
+                        onChange={(e) =>
+                          setOption("gcpWorkloadIdentityProvider", e.target.value)
+                        }
+                        className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                        placeholder="projects/123/locations/global/workloadIdentityPools/.../providers/..."
+                      />
+                    </label>
+
+                    <label className="grid gap-1">
+                      <span className="text-sm font-medium">
+                        GCP Service Account Email
+                      </span>
+                      <input
+                        disabled={busy}
+                        value={options.gcpServiceAccountEmail ?? ""}
+                        onChange={(e) =>
+                          setOption("gcpServiceAccountEmail", e.target.value)
+                        }
+                        className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                        placeholder="deployer@project.iam.gserviceaccount.com"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-white/15 bg-white/5 p-4">
+                  <div className="mb-2">
+                    <div className="text-sm font-medium text-white">Services</div>
+                    <div className="text-xs text-slate-200">
+                      Cloud Run service names to deploy.
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3">
+                    <label className="grid gap-1">
+                      <span className="text-sm font-medium">Backend service</span>
+                      <input
+                        disabled={busy}
+                        value={options.gcpBackendService ?? ""}
+                        onChange={(e) => setOption("gcpBackendService", e.target.value)}
+                        className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                        placeholder="my-app-api"
+                      />
+                    </label>
+
+                    <label className="grid gap-1">
+                      <span className="text-sm font-medium">Frontend service</span>
+                      <input
+                        disabled={busy}
+                        value={options.gcpFrontendService ?? ""}
+                        onChange={(e) => setOption("gcpFrontendService", e.target.value)}
+                        className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                        placeholder="my-app-web"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-white/15 bg-white/5 p-4">
+                  <div className="mb-2">
+                    <div className="text-sm font-medium text-white">
+                      Artifact Registry + Images
+                    </div>
+                    <div className="text-xs text-slate-200">
+                      Repo names + image names (without registry host).
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3">
+                    <label className="grid gap-1">
+                      <span className="text-sm font-medium">Backend AR repo</span>
+                      <input
+                        disabled={busy}
+                        value={options.gcpBackendArRepo ?? ""}
+                        onChange={(e) => setOption("gcpBackendArRepo", e.target.value)}
+                        className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                        placeholder="autodeploy"
+                      />
+                    </label>
+
+                    <label className="grid gap-1">
+                      <span className="text-sm font-medium">Frontend AR repo</span>
+                      <input
+                        disabled={busy}
+                        value={options.gcpFrontendArRepo ?? ""}
+                        onChange={(e) => setOption("gcpFrontendArRepo", e.target.value)}
+                        className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                        placeholder="autodeploy"
+                      />
+                    </label>
+
+                    <label className="grid gap-1">
+                      <span className="text-sm font-medium">Backend image name</span>
+                      <input
+                        disabled={busy}
+                        value={options.gcpBackendImageName ?? ""}
+                        onChange={(e) => setOption("gcpBackendImageName", e.target.value)}
+                        className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                        placeholder="my-app-api"
+                      />
+                    </label>
+
+                    <label className="grid gap-1">
+                      <span className="text-sm font-medium">Frontend image name</span>
+                      <input
+                        disabled={busy}
+                        value={options.gcpFrontendImageName ?? ""}
+                        onChange={(e) => setOption("gcpFrontendImageName", e.target.value)}
+                        className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                        placeholder="my-app-web"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-white/15 bg-white/5 p-4">
+                  <div className="mb-2">
+                    <div className="text-sm font-medium text-white">Repo layout</div>
+                    <div className="text-xs text-slate-200">
+                      Docker build contexts + Dockerfile paths.
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3">
+                    <label className="grid gap-1">
+                      <span className="text-sm font-medium">Backend context</span>
+                      <input
+                        disabled={busy}
+                        value={options.gcpBackendContext ?? ""}
+                        onChange={(e) => setOption("gcpBackendContext", e.target.value)}
+                        className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                        placeholder="server"
+                      />
+                    </label>
+
+                    <label className="grid gap-1">
+                      <span className="text-sm font-medium">Backend Dockerfile</span>
+                      <input
+                        disabled={busy}
+                        value={options.gcpBackendDockerfile ?? ""}
+                        onChange={(e) => setOption("gcpBackendDockerfile", e.target.value)}
+                        className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                        placeholder="server/Dockerfile"
+                      />
+                    </label>
+
+                    <label className="grid gap-1">
+                      <span className="text-sm font-medium">Frontend context</span>
+                      <input
+                        disabled={busy}
+                        value={options.gcpFrontendContext ?? ""}
+                        onChange={(e) => setOption("gcpFrontendContext", e.target.value)}
+                        className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                        placeholder="client"
+                      />
+                    </label>
+
+                    <label className="grid gap-1">
+                      <span className="text-sm font-medium">Frontend Dockerfile</span>
+                      <input
+                        disabled={busy}
+                        value={options.gcpFrontendDockerfile ?? ""}
+                        onChange={(e) => setOption("gcpFrontendDockerfile", e.target.value)}
+                        className="rounded-md border border-white/25 px-3 py-2 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400"
+                        placeholder="client/Dockerfile"
+                      />
+                    </label>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="grid gap-1">
+                        <span className="text-sm font-medium">Backend port</span>
+                        <input
+                          disabled={busy}
+                          type="number"
+                          inputMode="numeric"
+                          value={options.gcpBackendPort ?? 8080}
+                          onChange={(e) =>
+                            setOption("gcpBackendPort", Number(e.target.value))
+                          }
+                          className="h-9 w-28 rounded-md border border-white/25 px-2 py-1.5 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        />
+                      </label>
+
+                      <label className="grid gap-1">
+                        <span className="text-sm font-medium">Frontend port</span>
+                        <input
+                          disabled={busy}
+                          type="number"
+                          inputMode="numeric"
+                          value={options.gcpFrontendPort ?? 8080}
+                          onChange={(e) =>
+                            setOption("gcpFrontendPort", Number(e.target.value))
+                          }
+                          className="h-9 w-28 rounded-md border border-white/25 px-2 py-1.5 text-sm font-mono text-white bg-white/10 placeholder-white/60 disabled:bg-white/5 disabled:text-slate-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowGcpAdvanced((v) => !v)}
+                        className="text-xs text-slate-200 underline underline-offset-2 hover:text-white"
+                      >
+                        {showGcpAdvanced ? "Hide advanced" : "Show advanced"}
+                      </button>
+
+                      {showGcpAdvanced && (
+                        <div className="mt-2 space-y-2 rounded-md border border-white/15 bg-white/5 p-3">
+                          <div className="text-xs text-slate-200">
+                            Advanced: this generates Dockerfiles at workflow runtime
+                            (only if missing). Recommended: use the Dashboard
+                            Dockerfile scaffold button to commit Dockerfiles into
+                            the repo.
+                          </div>
+
+                          <label className="inline-flex items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              disabled={busy}
+                              checked={!!options.gcpGenerateDockerfiles}
+                              onChange={(e) =>
+                                setOption(
+                                  "gcpGenerateDockerfiles",
+                                  e.target.checked
+                                )
+                              }
+                              className="h-4 w-4 rounded border-white/40 bg-white/10"
+                            />
+                            <span>
+                              Auto-generate Dockerfiles in workflow if missing
+                            </span>
+                          </label>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
             )}
 
             {/* Generate / Open PR buttons */}
@@ -765,6 +1064,30 @@ export default function ConfigurePage() {
               >
                 Propose CI pipeline
               </button>
+            <div className="flex-1 min-h-[360px] max-h-[576px] overflow-y-auto rounded-md border border-white/20 bg-white/5 px-3 py-2 space-y-2">
+              {chatMessages.map((m, idx) => (
+                <div
+                  key={idx}
+                  className={`flex ${
+                    m.role === "user" ? "justify-end" : "justify-start"
+                  }`}
+                >
+                  <div
+                    className={`rounded-lg px-3 py-2 text-xs whitespace-pre-wrap ${
+                      m.role === "user"
+                        ? "bg-white/20 text-white border border-white/30"
+                        : "bg-white text-slate-900 border border-slate-200"
+                    } max-w-[80%]`}
+                  >
+                    {m.content}
+                  </div>
+                </div>
+              ))}
+              {chatLoading && (
+                <p className="text-[11px] text-slate-200">
+                  Thinking about your pipeline…
+                </p>
+              )}
             </div>
 
             {/* Compact read-only output for regular users */}

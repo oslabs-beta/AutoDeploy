@@ -1,22 +1,20 @@
-import { usePipelineStore } from "../store/usePipelineStore";
+import { usePipelineStore } from '../store/usePipelineStore';
 
 // In dev: talk to Vite dev server proxy at /api
 // In prod: use the real backend URL from VITE_API_BASE (e.g. https://api.autodeploy.app)
-const DEFAULT_API_BASE = import.meta.env.MODE === "development" ? "/api" : "";
+const DEFAULT_API_BASE = import.meta.env.MODE === 'development' ? '/api' : '';
 
 export const BASE = import.meta.env.VITE_API_BASE || DEFAULT_API_BASE;
 
 // SERVER_BASE is the same as BASE but without trailing /api,
 // so we can call /mcp and /auth directly.
-const SERVER_BASE = BASE.endsWith("/api")
-  ? BASE.slice(0, -4)
-  : BASE;
+const SERVER_BASE = BASE.endsWith('/api') ? BASE.slice(0, -4) : BASE;
 
 // Generic REST helper for /api/* endpoints
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
-    credentials: "include",
+    headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+    credentials: 'include',
     ...opts,
   });
 
@@ -25,7 +23,6 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   return data as T;
 }
 
-
 // Helper for MCP tool calls on the server at /mcp/v1/:tool_name
 async function mcp<T>(
   tool: string,
@@ -33,21 +30,20 @@ async function mcp<T>(
 ): Promise<T> {
   const url = `${SERVER_BASE}/mcp/v1/${encodeURIComponent(tool)}`;
   const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     body: JSON.stringify(input),
   });
   const payload = await res.json().catch(() => ({}));
   if (!res.ok || (payload as any)?.success === false) {
-    const msg = (payload as any)?.error || res.statusText || "MCP error";
+    const msg = (payload as any)?.error || res.statusText || 'MCP error';
     throw new Error(msg);
   }
   return (payload as any).data as T;
 }
 
-
-  // A single saved YAML version from pipeline_history
+// A single saved YAML version from pipeline_history
 export type PipelineVersion = {
   id: string;
   user_id: string;
@@ -107,8 +103,7 @@ let cachedRepos: string[] | null = null;
 const cachedBranches = new Map<string, string[]>();
 
 export const api = {
-
-  me: () => request<{ userId: string; email?: string }>("/api/me"),
+  me: () => request<{ userId: string; email?: string }>('/api/me'),
 
   // ===== Pipeline history + rollback =====
 
@@ -121,22 +116,22 @@ export const api = {
     const { repoFullName, branch, path, limit } = params;
 
     const qs = new URLSearchParams();
-    qs.set("repoFullName", repoFullName);
-    if (branch) qs.set("branch", branch);
-    if (path) qs.set("path", path);
-    if (limit) qs.set("limit", String(limit));
+    qs.set('repoFullName', repoFullName);
+    if (branch) qs.set('branch', branch);
+    if (path) qs.set('path', path);
+    if (limit) qs.set('limit', String(limit));
 
     const res = await fetch(
       `${SERVER_BASE}/mcp/v1/pipeline_history?${qs.toString()}`,
       {
-        method: "GET",
-        credentials: "include",
+        method: 'GET',
+        credentials: 'include',
       }
     );
 
     const payload = await res.json().catch(() => ({} as any));
     if (!res.ok || !payload.ok) {
-      throw new Error(payload.error || res.statusText || "History failed");
+      throw new Error(payload.error || res.statusText || 'History failed');
     }
 
     // Back-end shape: { ok: true, data: { versions: { rows: [...] } } }
@@ -147,21 +142,20 @@ export const api = {
 
   async rollbackPipeline(versionId: string): Promise<any> {
     const res = await fetch(`${SERVER_BASE}/mcp/v1/pipeline_rollback`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({ versionId }),
     });
 
     const payload = await res.json().catch(() => ({}));
     if (!res.ok || !payload.ok) {
-      throw new Error(payload.error || res.statusText || "Rollback failed");
+      throw new Error(payload.error || res.statusText || 'Rollback failed');
     }
 
     // Backend mention: data.data.github.commit.html_url, etc
     return payload.data;
   },
-
 
   async listAwsRoles(): Promise<{ roles: string[] }> {
     // If we've already successfully fetched roles, reuse them.
@@ -178,20 +172,19 @@ export const api = {
 
     try {
       const data = await mcp<{ roles?: { name: string; arn: string }[] }>(
-        "oidc_adapter",
-        { provider: "aws" }
+        'oidc_adapter',
+        { provider: 'aws' }
       );
 
       const roles = (data.roles ?? []).map((r) => r.arn);
       cachedAwsRoles = roles;
       return { roles };
     } catch (err) {
-      console.error("[api.listAwsRoles] failed:", err);
+      console.error('[api.listAwsRoles] failed:', err);
       // Don't throw again to avoid retry loops; just return empty.
       return { roles: [] };
     }
   },
-
 
   // AI wizard – talks to /agent/wizard on the backend
   // askYamlWizard: async (input: {
@@ -220,34 +213,34 @@ export const api = {
   // },
 
   askYamlWizard: async (input: {
-  repoUrl: string;
-  provider: string;
-  branch: string;
-  message?: string;   // frontend name
-  yaml?: string;
-}) => {
-  const payload = {
-    ...input,
-    prompt: input.message ?? "",   // 👈 REQUIRED BY BACKEND
-  };
+    repoUrl: string;
+    provider: string;
+    branch: string;
+    message?: string; // frontend name
+    yaml?: string;
+  }) => {
+    const payload = {
+      ...input,
+      prompt: input.message ?? '', // 👈 REQUIRED BY BACKEND
+    };
 
-  delete (payload as any).message;  // 👈 prevent backend confusion
+    delete (payload as any).message; // 👈 prevent backend confusion
 
-  const res = await fetch(`${SERVER_BASE}/agent/wizard/ai`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify(payload),
-  });
+    const res = await fetch(`${SERVER_BASE}/agent/wizard/ai`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(payload),
+    });
 
-  const data = await res.json().catch(() => ({}));
+    const data = await res.json().catch(() => ({}));
 
-  if (!res.ok || data?.success === false) {
-    throw new Error(data?.error || res.statusText || "Agent error");
-  }
+    if (!res.ok || data?.success === false) {
+      throw new Error(data?.error || res.statusText || 'Agent error');
+    }
 
-  return data.data;
-},
+    return data.data;
+  },
 
   // ===== MCP helpers for repos / branches / pipeline generation =====
   async listRepos(): Promise<{ repos: string[] }> {
@@ -276,7 +269,7 @@ export const api = {
       cachedRepos = repos;
       return { repos };
     } catch (err) {
-      console.error("[api.listRepos] failed:", err);
+      console.error('[api.listRepos] failed:', err);
       // allow retry on next call if this failed
       cachedRepos = null;
       return { repos: [] };
@@ -295,7 +288,7 @@ export const api = {
         success?: boolean;
         data?: { repositories: { full_name: string; branches?: string[] }[] };
         repositories?: { full_name: string; branches?: string[] }[];
-      }>("repo_reader", { repoFullName: repo });
+      }>('repo_reader', { repoFullName: repo });
 
       const body = (outer as any)?.data ?? outer;
       const match = body?.repositories?.find((r: any) => r.full_name === repo);
@@ -308,35 +301,35 @@ export const api = {
       return { branches: fallback };
     }
   },
-//  async listRepos(): Promise<{ repos: string[] }> {
-//     //  If we already have repos cached, reuse them.
-//     if (cachedRepos && cachedRepos.length > 0) {
-//       return { repos: cachedRepos };
-//     }
+  //  async listRepos(): Promise<{ repos: string[] }> {
+  //     //  If we already have repos cached, reuse them.
+  //     if (cachedRepos && cachedRepos.length > 0) {
+  //       return { repos: cachedRepos };
+  //     }
 
-//     //  If we've already tried once and failed, don't hammer the server.
-//     if (reposAttempted && !cachedRepos) {
-//       return { repos: [] };
-//     }
+  //     //  If we've already tried once and failed, don't hammer the server.
+  //     if (reposAttempted && !cachedRepos) {
+  //       return { repos: [] };
+  //     }
 
-//     reposAttempted = true;
+  //     reposAttempted = true;
 
-//     try {
-//       const outer = await mcp<{
-//         provider: string;
-//         user: string;
-//         repositories: { full_name: string }[];
-//       }>("repo_reader", {});
+  //     try {
+  //       const outer = await mcp<{
+  //         provider: string;
+  //         user: string;
+  //         repositories: { full_name: string }[];
+  //       }>("repo_reader", {});
 
-//       const repos = outer?.repositories?.map((r) => r.full_name) ?? [];
-//       cachedRepos = repos;
-//       return { repos };
-//     } catch (err) {
-//       console.error("[api.listRepos] failed:", err);
-//       // Don't throw to avoid retry loops from effects; just return whatever we have (or empty).
-//       return { repos: cachedRepos ?? [] };
-//     }
-//   },
+  //       const repos = outer?.repositories?.map((r) => r.full_name) ?? [];
+  //       cachedRepos = repos;
+  //       return { repos };
+  //     } catch (err) {
+  //       console.error("[api.listRepos] failed:", err);
+  //       // Don't throw to avoid retry loops from effects; just return whatever we have (or empty).
+  //       return { repos: cachedRepos ?? [] };
+  //     }
+  //   },
 
   //   async listBranches(repo: string): Promise<{ branches: string[] }> {
   //   // ✅ If we already have branches cached for this repo, reuse them.
@@ -382,11 +375,75 @@ export const api = {
     const {
       repo,
       branch,
-      template = "node_app",
-      provider = "aws",
+      template = 'node_app',
+      provider = 'aws',
       options,
     } = payload || {};
-    const data = await mcp("pipeline_generator", {
+
+    // For GCP Cloud Run we use the dedicated adapter which returns a workflow YAML.
+    // IMPORTANT: omit empty-string values so gcp_adapter can fall back to its
+    // `${{ secrets.* }}` defaults.
+    if (provider === 'gcp') {
+      const o = options || {};
+      const gcpInput: Record<string, any> = {
+        repo,
+        branch,
+        ...(Array.isArray(o.stages) ? { stages: o.stages } : {}),
+
+        ...(o.gcpProjectId ? { gcp_project_id: o.gcpProjectId } : {}),
+        ...(o.gcpRegion ? { gcp_region: o.gcpRegion } : {}),
+        ...(o.gcpWorkloadIdentityProvider
+          ? { workload_identity_provider: o.gcpWorkloadIdentityProvider }
+          : {}),
+        ...(o.gcpServiceAccountEmail
+          ? { service_account_email: o.gcpServiceAccountEmail }
+          : {}),
+
+        ...(o.gcpBackendService ? { backend_service: o.gcpBackendService } : {}),
+        ...(o.gcpFrontendService
+          ? { frontend_service: o.gcpFrontendService }
+          : {}),
+
+        ...(o.gcpBackendArRepo ? { backend_ar_repo: o.gcpBackendArRepo } : {}),
+        ...(o.gcpFrontendArRepo
+          ? { frontend_ar_repo: o.gcpFrontendArRepo }
+          : {}),
+
+        ...(o.gcpBackendImageName
+          ? { backend_image_name: o.gcpBackendImageName }
+          : {}),
+        ...(o.gcpFrontendImageName
+          ? { frontend_image_name: o.gcpFrontendImageName }
+          : {}),
+
+        ...(o.gcpBackendContext ? { backend_context: o.gcpBackendContext } : {}),
+        ...(o.gcpBackendDockerfile
+          ? { backend_dockerfile: o.gcpBackendDockerfile }
+          : {}),
+
+        ...(o.gcpFrontendContext
+          ? { frontend_context: o.gcpFrontendContext }
+          : {}),
+        ...(o.gcpFrontendDockerfile
+          ? { frontend_dockerfile: o.gcpFrontendDockerfile }
+          : {}),
+
+        ...(typeof o.gcpBackendPort === 'number'
+          ? { backend_port: o.gcpBackendPort }
+          : {}),
+        ...(typeof o.gcpFrontendPort === 'number'
+          ? { frontend_port: o.gcpFrontendPort }
+          : {}),
+
+        ...(typeof o.gcpGenerateDockerfiles === 'boolean'
+          ? { generate_dockerfiles: o.gcpGenerateDockerfiles }
+          : {}),
+      };
+
+      return await mcp('gcp_adapter', gcpInput);
+    }
+
+    const data = await mcp('pipeline_generator', {
       repo,
       branch,
       provider,
@@ -436,6 +493,106 @@ export const api = {
       return null;
     }
   },
+  // Added by Lorenc
+  /**
+   * Call backend /mcp/v1/scaffold/commit (scaffoldCommitRouter)
+   * to generate + commit Dockerfiles and .dockerignore files
+   * into the selected GitHub repo.
+   */
+  async scaffoldRepoFiles(params: {
+    repoFullName?: string;
+    repoUrl?: string;
+    branch?: string;
+    backendPath?: string;
+    frontendPath?: string;
+  }): Promise<{
+    ok: boolean;
+    repo: string;
+    branch: string;
+    committed: { path: string; commitSha: string | null }[];
+  }> {
+    const { repoFullName, repoUrl, branch, backendPath, frontendPath } = params;
+
+    const body: Record<string, any> = {
+      repoFullName,
+      repoUrl,
+      branch: branch || "main",
+      // Let the backend defaults apply if these are undefined
+      ...(backendPath ? { backendPath } : {}),
+      ...(frontendPath ? { frontendPath } : {}),
+    };
+
+    const res = await fetch(`${SERVER_BASE}/mcp/v1/scaffold/commit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(body),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data?.ok === false) {
+      throw new Error(data?.error || res.statusText || "Scaffold commit failed");
+    }
+    return data;
+  },
+
+  /**
+   * Check if the selected repo already has Dockerfiles (backend/, frontend/, or root).
+   * Used to disable the Dockerfile scaffolding button.
+   */
+  async repoHasDockerfiles(repoFullName: string): Promise<boolean> {
+    const fetchContents = async (path?: string): Promise<
+      { name: string; path: string; type: string }[]
+    > => {
+      const qs = new URLSearchParams();
+      qs.set("action", "contents");
+      qs.set("repo", repoFullName);
+      if (path) qs.set("path", path);
+
+      const res = await fetch(`${SERVER_BASE}/mcp/v1/github?${qs.toString()}`, {
+        method: "GET",
+        credentials: "include",
+      });
+
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok || payload?.success === false) {
+        throw new Error(payload?.error || res.statusText || "GitHub contents failed");
+      }
+
+      const data = payload.data || payload;
+      return (data?.contents ?? []) as { name: string; path: string; type: string }[];
+    };
+
+    const checkDir = async (path?: string): Promise<boolean> => {
+      try {
+        const contents = await fetchContents(path);
+        const found = contents.some((c) => c?.name === "Dockerfile");
+        if (found) {
+          console.log("[api.repoHasDockerfiles] Found Dockerfile in", {
+            repoFullName,
+            path,
+          });
+        }
+        return found;
+      } catch (e) {
+        console.error("[api.repoHasDockerfiles] failed", { repoFullName, path, e });
+        return false;
+      }
+    };
+
+    // Common layouts: backend/frontend, server/client, plus repo root
+    const [backend, frontend, serverDir, clientDir, root] = await Promise.all([
+      checkDir("backend"),
+      checkDir("frontend"),
+      checkDir("server"),
+      checkDir("client"),
+      checkDir(undefined),
+    ]);
+
+    return backend || frontend || serverDir || clientDir || root;
+  },
+
+  // ===== OIDC roles (AWS) with caching =====
 
   // ===== OIDC roles (AWS) with caching =====
 
@@ -463,7 +620,7 @@ export const api = {
   // },
 
   async openPr(_payload: any) {
-    throw new Error("openPr is not implemented on the server (no MCP tool)");
+    throw new Error('openPr is not implemented on the server (no MCP tool)');
   },
 
   // --- Config/secrets endpoints for Secrets/Preflight flow ---
@@ -589,12 +746,12 @@ export const api = {
     const s = Object.fromEntries(secrets.map((x) => [x.key, x.present] as const));
 
     const results = [
-      { label: "GitHub App installed", ok: hasGithubApp },
-      { label: "Repo write access", ok: hasRepoWrite },
-      { label: "AWS OIDC configured", ok: hasAws, info: role },
-      { label: "Secret: GITHUB_TOKEN", ok: !!s.GITHUB_TOKEN },
-      { label: "Secret: AWS_ROLE_ARN", ok: !!s.AWS_ROLE_ARN, info: role },
-      { label: "AWS Region selected", ok: !!region, info: region },
+      { label: 'GitHub App installed', ok: hasGithubApp },
+      { label: 'Repo write access', ok: hasRepoWrite },
+      { label: 'AWS OIDC configured', ok: hasAws, info: role },
+      { label: 'Secret: GITHUB_TOKEN', ok: !!s.GITHUB_TOKEN },
+      { label: 'Secret: AWS_ROLE_ARN', ok: !!s.AWS_ROLE_ARN, info: role },
+      { label: 'AWS Region selected', ok: !!region, info: region },
     ];
     return { results };
   },
@@ -620,25 +777,23 @@ export const api = {
       fromCallerRepo ||
       pipelineStore?.repoFullName ||
       (pipelineStore as any)?.result?.repo;
-    const selectedBranch = branch || (pipelineStore as any)?.selectedBranch || "main";
+    const selectedBranch =
+      branch || (pipelineStore as any)?.selectedBranch || 'main';
     const yaml =
-  fromCallerYaml ||
-  (pipelineStore as any)?.result?.generated_yaml ||
-  "";
+      fromCallerYaml || (pipelineStore as any)?.result?.generated_yaml || '';
 
-    const environment = env || (pipelineStore as any)?.environment || "dev";
+    const environment = env || (pipelineStore as any)?.environment || 'dev';
 
-    const providerFinal = provider || (pipelineStore as any)?.provider || "aws";
-    const pathFinal =
-      path || `.github/workflows/${environment}-deploy.yml`;
+    const providerFinal = provider || (pipelineStore as any)?.provider || 'aws';
+    const pathFinal = path || `.github/workflows/${environment}-deploy.yml`;
 
-    console.group("[Deploy Debug]");
-    console.log("repoFullName:", repoFullName);
-    console.log("selectedBranch:", selectedBranch);
-    console.log("environment:", environment);
-    console.log("provider:", providerFinal);
-    console.log("path:", pathFinal);
-    console.log("YAML length:", yaml ? yaml.length : 0);
+    console.group('[Deploy Debug]');
+    console.log('repoFullName:', repoFullName);
+    console.log('selectedBranch:', selectedBranch);
+    console.log('environment:', environment);
+    console.log('provider:', providerFinal);
+    console.log('path:', pathFinal);
+    console.log('YAML length:', yaml ? yaml.length : 0);
     console.groupEnd();
 
     const payload = {
@@ -650,59 +805,77 @@ export const api = {
       path: pathFinal,
     };
 
-    console.log("[Deploy] Final payload:", payload);
-if (!repoFullName) throw new Error("startDeploy: missing repoFullName");
-if (!selectedBranch) throw new Error("startDeploy: missing branch");
-if (!yaml || yaml.trim().length === 0) throw new Error("startDeploy: missing yaml");
+    console.log('[Deploy] Final payload:', payload);
+    if (!repoFullName) throw new Error('startDeploy: missing repoFullName');
+    if (!selectedBranch) throw new Error('startDeploy: missing branch');
+    if (!yaml || yaml.trim().length === 0)
+      throw new Error('startDeploy: missing yaml');
 
     const res = await fetch(`${SERVER_BASE}/mcp/v1/pipeline_commit`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify(payload),
     });
 
     const data = await res.json().catch(() => ({}));
 
-    console.group("[Deploy Response]");
-    console.log("Status:", res.status);
-    console.log("Data:", data);
+    console.group('[Deploy Response]');
+    console.log('Status:', res.status);
+    console.log('Data:', data);
     console.groupEnd();
 
-    if (!res.ok)
-      throw new Error(`Pipeline commit failed: ${res.statusText}`);
+    if (!res.ok) throw new Error(`Pipeline commit failed: ${res.statusText}`);
     return data;
   },
 
   streamJob(
     _jobId: string,
-    onEvent: (e: { ts: string; level: "info"; msg: string }) => void
+    onEvent: (e: { ts: string; level: 'info'; msg: string }) => void,
+    onDone?: () => void
   ) {
     const steps = [
-      "Connecting to GitHub...",
-      "Committing workflow file...",
-      "Verifying commit...",
-      "Done ✅",
+      'Connecting to GitHub...',
+      'Committing workflow file...',
+      'Verifying commit...',
+      'Done ✅',
     ];
     let i = 0;
+    let finished = false;
+
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      if (onDone) onDone();
+    };
+
     const timer = setInterval(() => {
-      if (i >= steps.length) return;
+      if (i >= steps.length) {
+        clearInterval(timer);
+        finish();
+        return;
+      }
       onEvent({
         ts: new Date().toISOString(),
-        level: "info",
+        level: 'info',
         msg: steps[i++],
       });
-      if (i >= steps.length) clearInterval(timer);
+      if (i >= steps.length) {
+        clearInterval(timer);
+        finish();
+      }
     }, 600);
-    return () => clearInterval(timer);
+
+    return () => {
+      clearInterval(timer);
+      finish();
+    };
   },
 };
 
 // Helper to start GitHub OAuth (server redirects back after callback)
-export function startGitHubOAuth(
-  redirectTo: string = window.location.origin
-) {
-  const serverBase = BASE.replace(/\/api$/, "");
+export function startGitHubOAuth(redirectTo: string = window.location.origin) {
+  const serverBase = BASE.replace(/\/api$/, '');
   const url = `${serverBase}/auth/github/start?redirect_to=${encodeURIComponent(
     redirectTo
   )}`;
