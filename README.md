@@ -2,6 +2,8 @@
 
 Auto-generated secure CI/CD pipelines with AI + MCP.
 
+Live site: https://autodeploy.app
+
 AutoDeploy is a full-stack monorepo that:
 
 - connects to GitHub (OAuth)
@@ -26,6 +28,7 @@ AutoDeploy is a full-stack monorepo that:
   - [MCP mock core + agent (local)](#mcp-mock-core--agent-local)
 - [Environment Configuration](#environment-configuration)
 - [Database Setup](#database-setup)
+- [AWS OIDC Setup](#aws-oidc-setup)
 - [GCP (Cloud Run) Usage](#gcp-cloud-run-usage)
 - [Testing](#testing)
 - [Project Structure](#project-structure)
@@ -221,9 +224,11 @@ npm run dev
 
 The Vite dev server defaults to port `5173`.
 
-### MCP mock core + agent (local)
+### MCP mock core + agents (local)
 
-Useful for developing MCP integration without a real MCP core.
+Useful for developing MCP integration without a real MCP core, and for exercising the AI wizard in isolation.
+
+#### Low-level MCP agent
 
 ```bash
 cd server
@@ -231,7 +236,7 @@ cd server
 # 1) Start mock MCP core (expects Bearer dev-key-123)
 node src/scripts/mockMcp.js
 
-# 2) Run MCP agent directly
+# 2) Run low-level MCP client against the mock core
 node src/agents/mcpAgent.js
 ```
 
@@ -241,6 +246,33 @@ Example `.env` values:
 MCP_URL=http://localhost:7070
 MCP_API_KEY=dev-key-123
 ```
+
+#### Wizard Agent (CLI + HTTP)
+
+The AI wizard that powers `/agent/wizard` and `/agent/wizard/ai` lives in `server/agent/wizardAgent.js`.
+
+Run it directly from the repo root for quick experiments:
+
+```bash
+cd server
+node agent/wizardAgent.js "List my repositories"
+```
+
+To call the wizard over HTTP from a running backend, POST to `/agent/wizard/ai` with an authenticated `mcp_session` cookie:
+
+```bash
+curl -X POST http://localhost:3000/agent/wizard/ai \
+  -H "Content-Type: application/json" \
+  -H "Cookie: mcp_session=YOUR_SESSION_TOKEN" \
+  -d '{
+    "prompt": "Generate a pipeline for owner/repo",
+    "repoUrl": "https://github.com/owner/repo",
+    "provider": "aws",
+    "branch": "main"
+  }'
+```
+
+See `server/agent/api_calls_doc.md` and `server/agent/wizardAgent_prompts.md` for more examples.
 
 ## Environment Configuration
 
@@ -296,6 +328,11 @@ Additionally, when running tools/agents outside the normal HTTP session, you can
 
 - **`MCP_SESSION_TOKEN`** – a pre-issued JWT that represents a user; used by `pipeline_generator` and `wizardAgent` when there is no cookie.
 
+To obtain a `MCP_SESSION_TOKEN` in local development:
+
+- Sign in through the UI, then copy the `mcp_session` cookie value from your browser devtools and paste it into your `.env` as `MCP_SESSION_TOKEN=...`.
+- Or call an authenticated endpoint (such as `GET /api/me`) from a browser and reuse the `mcp_session` cookie that the backend issues.
+
 Without these, the core backend still runs, but the wizard agent will be disabled.
 
 ### 6. GitHub token override (optional)
@@ -349,6 +386,19 @@ psql "$DATABASE_URL" -f server/db/schema.sql
 This will create the `users`, `connections`, `deployment_logs`, `pipeline_versions`, `aws_connections`, `aws_device_sessions`, `pipeline_sessions`, `pipeline_events`, and `github_repos` tables (plus a few supporting types and indexes) that AutoDeploy uses.
 
 If you are using Supabase, you can also paste the contents of `server/db/schema.sql` into the Supabase SQL editor and run it once.
+
+## AWS OIDC Setup
+
+When you choose the **AWS** provider, AutoDeploy generates GitHub Actions workflows that assume an IAM role via GitHub OIDC instead of using long‑lived access keys.
+
+High‑level steps:
+
+1. Create an IAM role that trusts the `token.actions.githubusercontent.com` identity provider and allows `sts:AssumeRoleWithWebIdentity`.
+2. Restrict the trust policy `Condition` so the `sub` (subject) matches your repo and branch (for example, `repo:owner/repo-name:ref:refs/heads/main`).
+3. Grant that role the permissions needed to deploy your app (for example S3, ECS, or Lambda, depending on how you wire AWS from your workflows/tools).
+4. Expose the role ARN to your workflows (for example via a GitHub secret such as `AWS_ROLE_ARN`) and select it in the AutoDeploy wizard when configuring AWS.
+
+For a visual diagram of the MCP → AWS flow and an example trust policy, see `server/tools/MCP_AWS_Deployment_Flow.md`.
 
 ## GCP Cloud Run Usage
 
