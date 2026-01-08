@@ -75,16 +75,6 @@ Key entry point:
 
 - `server/server.js` – bootstraps the Express app, middleware, and routes.
 
-Notable routes:
-
-- `GET /health` – basic health check (used by the smoke test)
-- `GET /db/ping` – database connectivity check (`server/db.js`)
-- `/auth/github/*` – GitHub OAuth flow
-- `/api/me` – session introspection (`requireSession`)
-- `/deployments/*` – deployment log APIs (retry/rollback/dispatch)
-- `/agent/*` – wizard orchestration endpoints
-- `/mcp/v1/*` – MCP tool façade
-- `/pipeline-sessions/*` – stateful wizard backed by Supabase tables
 Important route groups include:
 
 - `GET /health` – basic health check (used by the smoke test).
@@ -106,14 +96,6 @@ The backend expects a Postgres database (e.g., via a Supabase connection string)
 ### MCP tools
 
 Tools are registered in `server/tools/index.js` and exposed via `server/routes/mcp.js` at `/mcp/v1/:tool_name`.
-
-Notable tools:
-
-- `repo`, `repo_reader` – repository discovery and branch listing
-- `pipeline_generator` – synthesizes CI/CD workflow YAML
-- `oidc_adapter` – AWS OIDC role discovery/selection
-- `github_adapter` – GitHub automation (upsert files, workflow dispatch)
-- `gcp_adapter`, `scaffold_generator` – GCP workflow + Dockerfile scaffolding
 
 Each tool defines:
 
@@ -353,17 +335,7 @@ If you want to connect Google Cloud (for GCP workflows and credentials):
 
 These are used in `server/tools/google_adapter.js` to store encrypted GCP tokens.
 
-### 8. Jenkins MCP integration (optional)
-
-If you enable the Jenkins MCP integration, you’ll need:
-
-- **`JENKINS_USER`** – Jenkins username.
-- **`JENKINS_TOKEN`** – Jenkins API token.
-- **`JENKINS_MCP_URL`** – URL to the Jenkins MCP server (e.g. `http://your-jenkins-host:8090/mcp-server/mcp`).
-
-These are used by `server/src/agents/jenkins-agent.js` and `server/routes/jenkins.js`.
-
-### 9. MCP core (optional / advanced)
+### 8. MCP core (optional / advanced)
 
 If you are running a separate MCP core and want the backend to talk to it directly:
 

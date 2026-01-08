@@ -221,6 +221,7 @@ export const gcp_adapter = {
   deploy-backend:
     needs: build-backend
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -300,6 +301,7 @@ export const gcp_adapter = {
   deploy-frontend:
     needs: build-frontend
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - name: Checkout
         uses: actions/checkout@v4
